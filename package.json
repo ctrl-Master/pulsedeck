@@ -1,0 +1,18 @@
+{
+  "name": "pulsedeck",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pulsedeck · 多布局热点新闻聚合站，Cloudflare Worker + Pages，本地零依赖可跑",
+  "scripts": {
+    "dev": "node scripts/dev-server.js",
+    "dev:demo": "node scripts/dev-server.js --demo",
+    "test": "node scripts/test-parse.mjs",
+    "deploy": "wrangler deploy",
+    "worker:dev": "wrangler dev"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {}
+}

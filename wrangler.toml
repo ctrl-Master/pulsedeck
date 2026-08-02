@@ -1,0 +1,23 @@
+name = "pulsedeck"
+main = "worker/index.js"
+compatibility_date = "2026-01-01"
+
+# 单 Worker 同时托管前端静态资源与 API（推荐，前后端同域，无跨域问题）
+# 如果改用 Pages + Worker 分离部署，注释掉下面这段，
+# 并把 public/app.js 顶部的 API_BASE 指向 Worker 域名。
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# 每 20 分钟预热一次缓存，用户永远命中热数据
+[triggers]
+crons = ["*/20 * * * *"]
+
+# Workers AI 绑定：用于英文新闻自动翻译成中文（@cf/meta/m2m100-1.2b）
+# 无需外部密钥，随 Worker 运行。本地 Node 会自动降级为 MyMemory 免费接口。
+[ai]
+binding = "AI"
+
+[observability]
+enabled = true
