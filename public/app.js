@@ -889,12 +889,10 @@ async function loadNews({ fresh = false } = {}) {
     state.data = { note: '', ...data };
   } catch (err) {
     if (!state.data.items.length) {
-      el.stage.innerHTML = `<div class="fatal">
-        <div class="big">⚠</div>
-        <p class="fmsg">加载失败：${esc(err.message || err)}</p>
-        <button class="btn primary" id="retryBtn">重试</button>
-      </div>`;
-      document.getElementById('retryBtn')?.addEventListener('click', () => loadNews());
+      // 网络层失败（而非源级失败）：用一份新闻示例数据兜底，保证主站界面永远有内容，
+      // 不再卡在「加载失败」报错屏。接口恢复后会自动加载真实数据。
+      state.data = buildNewsSample();
+      state.config.categories = state.data.categories;
     } else {
       state.data = { ...state.data, note: `加载失败：${err.message}` };
     }
@@ -970,6 +968,74 @@ function buildCommunitySample() {
     sources: [...new Set(feeds.map((f) => f[0]))].map((id) => ({ id, name: feeds.find((f) => f[0] === id)[1], ok: false, count: 0, error: '示例数据' })),
     items,
     note: '社区接口暂不可用，已显示示例内容。', // 直接放进 state.data.note
+  };
+}
+
+/* 主站新闻网络层失败时的内存兜底示例数据，保证界面永远不白屏/不卡在报错。
+   与 /api/news 返回的同形状，前端渲染、搜索、排序、翻译全部可复用。 */
+function buildNewsSample() {
+  const MIN = 60 * 1000;
+  // [sourceId, 源名, 分类, 语言, 标题, 摘要, 分钟前, 点赞, 评论, 权重]
+  const rows = [
+    ['openai', 'OpenAI', 'ai', 'en', 'OpenAI launches GPT-5 with major reasoning improvements', 'The new model shows substantially stronger multi-step reasoning and tool use, with lower hallucination on long contexts.', 8, 4200, 880, 10],
+    ['googleai', 'Google AI', 'ai', 'en', 'Google DeepMind unveils improved protein-folding model', 'The update extends structure prediction to larger complexes and offers better uncertainty estimates for drug discovery.', 22, 3100, 540, 8],
+    ['anthropic', 'Anthropic', 'ai', 'en', 'Anthropic extends Claude context window to 1M tokens', 'Long-document analysis, legal review and codebase Q&A become practical without chunking.', 35, 2600, 410, 9],
+    ['nvidia-blog', 'NVIDIA Blog', 'ai', 'en', 'NVIDIA reports record data-center revenue on AI demand', 'Blackwell production ramps ahead of schedule as hyperscalers expand training clusters.', 50, 1900, 230, 7],
+    ['huggingface', 'Hugging Face', 'ai', 'en', 'Hugging Face ships new inference router for open models', 'A lightweight proxy routes requests to the cheapest model that meets a quality bar.', 64, 1200, 180, 7],
+    ['techcrunch', 'TechCrunch', 'tech', 'en', 'EU AI Act enforcement phase begins for high-risk systems', 'Providers must now document training data, risk controls and human oversight.', 12, 980, 150, 9],
+    ['theverge', 'The Verge', 'tech', 'en', 'Apple previews on-device foundation models for developers', 'A new foundation-apis framework lets apps run small models fully offline.', 28, 870, 120, 8],
+    ['arstechnica', 'Ars Technica', 'tech', 'en', 'Researchers report breakthrough in quantum error correction', 'Logical qubit fidelity crosses a threshold that could accelerate fault-tolerant roadmaps.', 41, 740, 95, 8],
+    ['wired', 'Wired', 'tech', 'en', 'The quiet rise of tiny models that run on your laptop', 'Distilled and quantized LLMs are good enough for most daily tasks, privacy included.', 58, 610, 70, 7],
+    ['simonwillison', 'Simon Willison', 'dev', 'en', 'A pragmatic guide to shipping LLM features in production', 'Observability, evals and graceful degradation matter more than model choice.', 19, 530, 60, 8],
+    ['github-blog', 'GitHub Blog', 'dev', 'en', 'GitHub Copilot now drafts full pull request descriptions', 'It summarizes diffs, links issues and suggests test cases from the change set.', 33, 480, 52, 6],
+    ['bytebytego', 'ByteByteGo', 'dev', 'en', 'Why every platform is rebuilding search on vector indexes', 'Hybrid lexical + semantic retrieval becomes the default for large knowledge bases.', 47, 410, 44, 6],
+    ['venturebeat', 'VentureBeat', 'business', 'en', 'Enterprise software shifts spend from seats to outcomes', 'CIOs tie AI tooling budgets to measurable task automation, not headcount.', 25, 390, 38, 6],
+    ['stratechery', 'Stratechery', 'business', 'en', 'Aggregation theory meets the agent era', 'Distribution advantage grows as models commoditize and interfaces converge.', 62, 350, 30, 8],
+    ['sspai', '少数派', 'cn', 'zh', '国产大模型集体降价，行业正式进入价格战', '多家厂商将 API 单价下调一半以上，中小开发者迎来低成本窗口。', 15, 1200, 260, 7],
+    ['jiqizhixin', '机器之心', 'cn', 'zh', '工信部发布人工智能赋能新型工业化行动方案', '方案明确到 2027 年形成一批可复制的“人工智能+制造”标杆场景。', 30, 980, 190, 8],
+    ['ifanr', '爱范儿', 'cn', 'zh', '国内首个超大规模智算中心落成并投入运营', '该中心采用液冷与全光互联，单机柜功率密度大幅提升。', 44, 760, 140, 6],
+    ['ruanyifeng', '阮一峰的网络日志', 'cn', 'zh', '大模型推理成本一年下降十倍意味着什么', '当调用成本趋近于零，产品形态会从“按次计费”转向“按价值计费”。', 70, 540, 90, 7],
+  ];
+  const catNames = { ai: 'AI', tech: 'Tech', dev: 'Developer', business: 'Business', cn: '中文' };
+  const seen = new Set();
+  const categories = [{ id: 'all', name: 'All' }];
+  const items = rows.map(([id, name, cat, lang, title, summary, min, pts, cm, w], i) => {
+    if (!seen.has(cat)) { seen.add(cat); categories.push({ id: cat, name: catNames[cat] || cat }); }
+    const ts = Date.now() - min * MIN;
+    return {
+      id: `news-sample-${i}`,
+      title,
+      link: 'https://example.com/news-sample',
+      source: name,
+      sourceId: id,
+      category: cat,
+      lang,
+      timestamp: ts,
+      published: new Date(ts).toISOString(),
+      summary,
+      digest: '',
+      description: summary,
+      image: null,
+      author: '',
+      tags: [],
+      points: pts,
+      comments: cm,
+      weight: w,
+      titleZh: '',
+      summaryZh: '',
+    };
+  });
+  return {
+    updated: new Date().toISOString(),
+    count: items.length,
+    demo: true,
+    categories,
+    sources: [...new Set(rows.map((r) => r[0]))].map((id) => {
+      const row = rows.find((r) => r[0] === id);
+      return { id, name: row[1], ok: false, count: 0, error: '示例数据' };
+    }),
+    items,
+    note: '新闻接口暂不可用，已显示内置示例内容（演示用）。',
   };
 }
 
