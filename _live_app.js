@@ -856,17 +856,11 @@ function closeOverlays() {
 /* ------------------------- 拉数据 ------------------------- */
 
 async function loadConfig() {
-  const ctrl = new AbortController();
-  const to = setTimeout(() => ctrl.abort(), 12000);
   try {
-    const res = await fetch(`${API_BASE}/api/config`, { signal: ctrl.signal });
-    if (!res.ok) throw new Error('接口返回 ' + res.status);
+    const res = await fetch(`${API_BASE}/api/config`);
     state.config = await res.json();
   } catch {
-    // 后端不可达（Vercel 函数层挂起/超时）时退回默认配置，绝不阻塞启动
     state.config = { categories: [{ id: 'all', name: '全部' }], feeds: [] };
-  } finally {
-    clearTimeout(to);
   }
 }
 
@@ -1365,10 +1359,6 @@ async function boot() {
     document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('on', b.dataset.mode === state.prefs.mode));
     if (state.prefs.mode === 'community') el.brandSub.textContent = '社区热点';
     bind();
-    /* 先渲染一份演示数据，保证页面「秒出内容」：即使后端接口挂起/超时，
-       也不会卡在空白或“没有匹配的内容”。后端恢复后会自动加载真实数据。
-       仅科技资讯模式需要预填（社区模式由 loadFeeds 自带兜底）。 */
-    if (state.prefs.mode !== 'community') state.data = buildNewsSample();
     render();
     await loadConfig();
     renderSources();
