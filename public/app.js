@@ -2,8 +2,14 @@
    Pulsedeck · 前端主逻辑（原生 ESM，无构建步骤）
    ========================================================= */
 
-/** 分离部署时改成 Worker 地址，例如 'https://pulsedeck.xxx.workers.dev' */
-const API_BASE = '';
+/** API 基地址。默认同源（''），配合 Cloudflare「橙云 + /api/* Worker 路由」零改动生效；
+ *  若 Cloudflare 是「灰云（仅 DNS）」无法走 Worker 路由，可在 index.html 加：
+ *    <meta name="api-base" content="https://pulsedeck-api.xxx.workers.dev">
+ *  或在控制台执行 window.PULSEDECK_API_BASE='https://...workers.dev' 后刷新。 */
+const API_BASE =
+  (document.querySelector('meta[name="api-base"]')?.getAttribute('content')) ||
+  (typeof window !== 'undefined' && window.PULSEDECK_API_BASE) ||
+  '';
 
 /* ------------------------- 布局定义 ------------------------- */
 
