@@ -192,17 +192,26 @@ const server = http.createServer(async (req, res) => {
       return res.end(buildRss(data, `http://localhost:${PORT}`));
     }
 
+    if (url.pathname === '/api/feeds') {
+      return sendJSON(res, { feeds: FEEDS, categories: CATEGORIES, count: FEEDS.length });
+    }
+
     if (url.pathname === '/api/health') {
       return sendJSON(res, { ok: true, time: new Date().toISOString(), feeds: FEEDS.length, live: LIVE_DEFAULT });
     }
 
-    if (url.pathname === '/api/placeholder') {
-      const svg = placeholderSVG(Object.fromEntries(url.searchParams));
+    if (url.pathname === '/api/placeholder' || url.pathname === '/api/img') {
+      // 与 Vercel 入口一致：/api/img 生成占位 SVG（w/h/t 参数）
+      const w = Math.min(Math.max(Number(url.searchParams.get('w')) || 600, 50), 2000);
+      const h = Math.min(Math.max(Number(url.searchParams.get('h')) || 400, 50), 2000);
+      const t = (url.searchParams.get('t') || 'Pulsedeck').slice(0, 40);
+      const svg = placeholderSVG({ w, h, text: t });
       res.writeHead(200, { 'Content-Type': 'image/svg+xml; charset=utf-8', 'Cache-Control': 'public, max-age=86400' });
       return res.end(svg);
     }
 
-    if (url.pathname === '/api/img') {
+    if (url.pathname === '/api/proxy-img') {
+      // 代理远程图片（保留原 dev-server 能力，供本地调试）
       const target = url.searchParams.get('u');
       if (!target || !/^https?:\/\//i.test(target)) return res.writeHead(400).end('bad url');
       try {
