@@ -17,12 +17,12 @@ const ICON = {
 };
 
 const LAYOUTS = [
-  { id: 'cards', name: 'Cards', hint: 'Thumbnail-first, fastest to scan' },
-  { id: 'list', name: 'List', hint: 'Highest density, great one-handed on mobile' },
-  { id: 'magazine', name: 'Magazine', hint: 'Big hero image + mixed layout, like a daily' },
-  { id: 'board', name: 'Board', hint: 'Columns by category, side-by-side compare' },
-  { id: 'timeline', name: 'Timeline', hint: 'Track events along a time axis' },
-  { id: 'reader', name: 'Reader', hint: 'Index on the left, article on the right' },
+  { id: 'cards', name: '卡片', hint: '图文卡片，最快扫读' },
+  { id: 'list', name: '列表', hint: '信息密度最高，适合手机单手' },
+  { id: 'magazine', name: '杂志', hint: '大图头条 + 混合排版，像日报' },
+  { id: 'board', name: '看板', hint: '按分类分列，并列对比' },
+  { id: 'timeline', name: '时间线', hint: '沿时间轴追踪事件' },
+  { id: 'reader', name: '阅读', hint: '左侧索引，右侧正文' },
 ];
 
 const STAR_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.8-5.2-2.73L6.8 19.6l1-5.8-4.2-4.1 5.8-.85z"/></svg>';
@@ -35,13 +35,13 @@ function surfaceError(msg) {
   s.innerHTML = `<div class="fatal">
     <div class="big">⚠</div>
     <p class="fmsg">${esc(msg)}</p>
-    <button class="btn primary" onclick="location.reload()">Reload</button>
+    <button class="btn primary" onclick="location.reload()">重新加载</button>
   </div>`;
 }
-window.addEventListener('error', (e) => surfaceError('Script error: ' + (e.message || (e.error && e.error.message) || 'unknown error')));
+window.addEventListener('error', (e) => surfaceError('脚本错误：' + (e.message || (e.error && e.error.message) || '未知错误')));
 window.addEventListener('unhandledrejection', (e) => {
   const r = e.reason;
-  surfaceError('Request or render failed: ' + (r && (r.message || r)) || 'unknown error');
+  surfaceError('请求或渲染失败：' + (r && (r.message || r)) || '未知错误');
 });
 
 /* ------------------------- 状态 ------------------------- */
@@ -57,9 +57,19 @@ const DEFAULT_PREFS = {
   proxy: false,
   onlyStar: false,
   block: '',
-  translate: false, // 客户端中英双语翻译总开关
+  translate: true, // 客户端中英双语翻译总开关（默认开启 = 主要英译中）
   sources: null, // null = 用服务端默认
   mode: 'tech', // 'tech' = 科技/AI 新闻；'community' = 社区热点（知乎/虎扑/贴吧/Reddit）
+};
+
+/* 科技模式分类中文显示名 */
+const CAT_NAMES = {
+  all: '全部',
+  tech: '科技',
+  ai: 'AI',
+  dev: '开发者',
+  business: '商业',
+  cn: '中文',
 };
 
 /* 社区模式下分类的中文显示名（其他语言/未知分类回退到原 id） */
@@ -69,6 +79,10 @@ const COMMUNITY_CAT_NAMES = {
   tieba: '贴吧',
   reddit: 'Reddit',
 };
+
+function catNameOf(c) {
+  return CAT_NAMES[c.id] || COMMUNITY_CAT_NAMES[c.id] || c.name || c.id;
+}
 
 /* 安全存储：预览环境的沙箱 iframe 可能禁用 localStorage，必须 try/catch，否则顶层抛错会让整页脚本中断 */
 const storage = {
@@ -156,14 +170,14 @@ function timeAgo(ts) {
   if (!ts) return '';
   const diff = Date.now() - ts;
   const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
+  if (m < 1) return '刚刚';
+  if (m < 60) return `${m} 分钟前`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
+  if (h < 24) return `${h} 小时前`;
   const d = new Date(ts);
   const days = Math.floor(h / 24);
-  if (days === 1) return `Yesterday ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  if (days < 7) return `${days}d ago`;
+  if (days === 1) return `昨天 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (days < 7) return `${days} 天前`;
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
@@ -177,9 +191,9 @@ function dayLabel(ts) {
   const today = new Date();
   const same = (a, b) => a.toDateString() === b.toDateString();
   const y = new Date(today.getTime() - 86400000);
-  if (same(d, today)) return 'Today';
-  if (same(d, y)) return 'Yesterday';
-  const week = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+  if (same(d, today)) return '今天';
+  if (same(d, y)) return '昨天';
+  const week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
   return `${d.getMonth() + 1}/${d.getDate()} ${week}`;
 }
 
@@ -266,7 +280,7 @@ async function translateAndShow(id) {
   if (!it) return;
   await translateItem(it);
   render();
-  toast(it.lang === 'zh' ? 'Translated to EN' : 'Translated to ZH');
+  toast(it.lang === 'zh' ? '已译为英文' : '已译为中文');
 }
 
 /* ------------------------- 主题 ------------------------- */
@@ -339,12 +353,12 @@ function categoryCounts() {
 
 function renderCats() {
   const counts = categoryCounts();
-  const cats = state.config.categories.length ? state.config.categories : [{ id: 'all', name: 'All' }];
+  const cats = state.config.categories.length ? state.config.categories : [{ id: 'all', name: '全部' }];
   el.cats.innerHTML = cats
     .map((c) => {
       const n = c.id === 'all' ? state.data.items.length : counts.get(c.id) || 0;
       const on = state.prefs.category === c.id ? ' on' : '';
-      return `<button class="cat${on}" data-cat="${c.id}" role="tab">${esc(c.name)}<span class="n">${n}</span></button>`;
+      return `<button class="cat${on}" data-cat="${c.id}" role="tab">${esc(catNameOf(c))}<span class="n">${n}</span></button>`;
     })
     .join('');
 }
@@ -355,7 +369,7 @@ function layoutButtonsHTML(mobile) {
     const svg = `<svg viewBox="0 0 24 24" fill="currentColor">${ICON[l.id]}</svg>`;
     return mobile
       ? `<button class="mb-btn${on}" data-layout="${l.id}">${svg}<span>${l.name}</span></button>`
-      : `<button class="lay-btn${on}" data-layout="${l.id}" title="${esc(l.hint)} (Shortcut ${i + 1})">${svg}<span>${l.name}</span></button>`;
+      : `<button class="lay-btn${on}" data-layout="${l.id}" title="${esc(l.hint)}（快捷键 ${i + 1}）">${svg}<span>${l.name}</span></button>`;
   }).join('');
 }
 
@@ -370,7 +384,7 @@ function renderNotice() {
   // 抓取失败的源不再单独提示（顶部不再显示“X 个源本次抓取失败”）。
   const parts = [];
   if (state.data.note) parts.push(state.data.note);
-  else if (state.data.demo) parts.push('Demo data is shown.');
+  else if (state.data.demo) parts.push('当前展示的是演示数据。');
   if (parts.length) {
     el.notice.innerHTML = parts.join(' ');
     el.notice.hidden = false;
@@ -383,8 +397,8 @@ function renderFoot(list) {
   const ok = (state.data.sources || []).filter((s) => s.ok).length;
   const total = (state.data.sources || []).length;
   const up = state.data.updated ? new Date(state.data.updated) : null;
-  const bi = state.prefs.translate ? ' · Bilingual on' : '';
-  el.footStat.textContent = `Showing ${list.length} / ${state.data.items.length} · ${ok}/${total} sources${up ? ` · updated ${clockOf(up.getTime())}` : ''}${bi}`;
+  const bi = state.prefs.translate ? ' · 双语开启' : '';
+  el.footStat.textContent = `显示 ${list.length} / ${state.data.items.length} · ${ok}/${total} 个来源${up ? ` · 更新于 ${clockOf(up.getTime())}` : ''}${bi}`;
 }
 
 function renderSources() {
@@ -395,11 +409,11 @@ function renderSources() {
     document.getElementById('srcNone') && (document.getElementById('srcNone').style.display = 'none');
     document.getElementById('srcReset') && (document.getElementById('srcReset').style.display = 'none');
     el.srcList.innerHTML =
-      `<div style="font-size:11px;color:var(--faint);padding:4px 9px">Community sources</div>` +
+      `<div style="font-size:11px;color:var(--faint);padding:4px 9px">社区来源</div>` +
       srcs
         .map((s) => {
           const bad = s.ok ? '' : ' bad';
-          const info = s.ok ? (s.count ? `${s.count} items` : 'empty') : (s.error || 'failed');
+          const info = s.ok ? (s.count ? `${s.count} 条` : '空') : (s.error || '失败');
           return `<label class="src-item">
             <input type="checkbox" disabled ${s.ok ? 'checked' : ''} />
             <span class="src-name">${esc(s.name)}</span>
@@ -417,7 +431,7 @@ function renderSources() {
 
   const stat = new Map((state.data.sources || []).map((s) => [s.id, s]));
   const enabled = new Set(state.prefs.sources ?? state.config.feeds.filter((f) => f.enabled).map((f) => f.id));
-  const catName = new Map(state.config.categories.map((c) => [c.id, c.short || c.name]));
+  const catName = new Map(state.config.categories.map((c) => [c.id, CAT_NAMES[c.id] || c.short || c.name]));
 
   const groups = new Map();
   for (const f of state.config.feeds) {
@@ -430,7 +444,7 @@ function renderSources() {
       const rows = feeds
         .map((f) => {
           const s = stat.get(f.id);
-          const info = s ? (s.ok ? `${s.count}` : 'failed') : '—';
+          const info = s ? (s.ok ? `${s.count}` : '失败') : '—';
           const bad = s && !s.ok ? ' bad' : '';
           return `<label class="src-item">
             <input type="checkbox" data-src="${f.id}" ${enabled.has(f.id) ? 'checked' : ''} />
@@ -449,7 +463,7 @@ function renderSources() {
 function metaHTML(it, extra = '') {
   const bits = [`<span class="src">${esc(it.source)}</span>`];
   if (it.timestamp) bits.push(`<span>${timeAgo(it.timestamp)}</span>`);
-  if (it.readMinutes) bits.push(`<span>${it.readMinutes} min read</span>`);
+  if (it.readMinutes) bits.push(`<span>${it.readMinutes} 分钟阅读</span>`);
   if (it.points) bits.push(`<span>▲ ${it.points}</span>`);
   if (extra) bits.push(extra);
   return `<div class="meta">${bits.join('<span class="sep">·</span>')}</div>`;
@@ -457,7 +471,7 @@ function metaHTML(it, extra = '') {
 
 function starHTML(it) {
   const on = state.star.has(it.id) ? ' on' : '';
-  return `<button class="star-btn${on}" data-star="${it.id}" aria-label="Star">${STAR_SVG}</button>`;
+  return `<button class="star-btn${on}" data-star="${it.id}" aria-label="收藏">${STAR_SVG}</button>`;
 }
 
 function cls(it) {
@@ -485,7 +499,7 @@ function zhSummary(it) {
 function trBtnHTML(it) {
   const on = it._tr ? ' on' : '';
   const label = it.lang === 'zh' ? 'EN' : 'ZH';
-  return `<button class="tr-btn${on}" data-tr="${esc(it.id)}" title="翻译 / Translate" aria-label="Translate">${label}</button>`;
+  return `<button class="tr-btn${on}" data-tr="${esc(it.id)}" title="翻译 / Translate" aria-label="翻译">${label}</button>`;
 }
 
 /* 卡片主摘要：优先显示「中文汇总 digest」（部署=AI 凝练，本地=译文/原文），
@@ -559,7 +573,7 @@ function viewMagazine(list) {
       <article class="mag-hero${cls(hero)}" data-id="${esc(hero.id)}">
         ${heroImg}
         <div class="mag-hero-body">
-          <span class="badge">Top · ${esc(hero.source)}</span>
+          <span class="badge">头条 · ${esc(hero.source)}</span>
           <h2 class="ttl" data-open="${esc(hero.id)}">${esc(hero.title)}${zhTitle(hero)}</h2>
           ${summaryHTML(hero)}
           ${metaHTML(hero)}
@@ -584,13 +598,13 @@ function viewMagazine(list) {
       briefs.length
         ? `<div class="mag-rest-head">更多快讯</div>
            <div class="mag-rest">${briefs
-             .map(
-               (it) => `<div class="mag-brief${cls(it)}" data-id="${esc(it.id)}">
+        .map(
+          (it) => `<div class="mag-brief${cls(it)}" data-id="${esc(it.id)}">
               <h4 class="ttl" data-open="${esc(it.id)}">${esc(it.title)}${zhTitle(it)}</h4>
               ${metaHTML(it)}
             </div>`
-             )
-             .join('')}</div>`
+        )
+        .join('')}</div>`
         : ''
     }
   </div>`;
@@ -598,7 +612,7 @@ function viewMagazine(list) {
 
 function viewBoard(list) {
   const byCat = state.prefs.category === 'all';
-  const nameOf = new Map(state.config.categories.map((c) => [c.id, c.name]));
+  const nameOf = new Map(state.config.categories.map((c) => [c.id, catNameOf(c)]));
 
   const groups = new Map();
   for (const it of list) {
@@ -687,38 +701,38 @@ function viewReader(list) {
 
 function readerPaneHTML() {
   const it = state.data.items.find((x) => x.id === state.selected);
-  if (!it) return '<div class="reader-empty">Select an item from the left to start reading</div>';
+  if (!it) return '<div class="reader-empty">从左侧选择一条开始阅读</div>';
   return `<div class="reader-inner">
     <div class="kicker">
       <span class="src-dot"></span>
       <strong style="color:var(--accent)">${esc(it.source)}</strong>
       <span class="sep">·</span><span>${timeAgo(it.timestamp)}</span>
       ${it.author ? `<span class="sep">·</span><span>${esc(it.author)}</span>` : ''}
-      ${it.readMinutes ? `<span class="sep">·</span><span>${it.readMinutes} min read</span>` : ''}
+      ${it.readMinutes ? `<span class="sep">·</span><span>${it.readMinutes} 分钟阅读</span>` : ''}
       <button class="icon-btn" data-mobile-close style="margin-left:auto">✕</button>
     </div>
     <h1>${esc(it.title)}${zhTitle(it)}</h1>
     ${state.prefs.images ? `<img class="reader-hero" src="${esc(imgSrc(it, 0))}" alt="" onerror="this.style.display='none'" />` : ''}
-    ${it.digest ? `<div class="body-digest"><span class="tag-zh">Summary</span>${esc(it.digest)}</div>` : ''}
-    <div class="body">${esc(it.description || it.summary || 'This source has no summary. Click below to read the original.')}</div>
+    ${it.digest ? `<div class="body-digest"><span class="tag-zh">摘要</span>${esc(it.digest)}</div>` : ''}
+    <div class="body">${esc(it.description || it.summary || '该来源没有摘要，点击下方阅读原文。')}</div>
     ${it.summaryZh && it.summaryZh !== it.digest ? `<div class="body-zh">${esc(it.summaryZh)}</div>` : ''}
     ${(it.tags || []).length ? `<div class="modal-tags">${it.tags.map((t) => `<span class="badge">#${esc(t)}</span>`).join('')}</div>` : ''}
     <div class="reader-actions">
-      <a class="btn primary" href="${esc(it.link)}" target="_blank" rel="noopener" data-read="${esc(it.id)}">Read original ↗</a>
-      <button class="btn" data-star="${esc(it.id)}">${state.star.has(it.id) ? '★ Starred' : '☆ Star'}</button>
+      <a class="btn primary" href="${esc(it.link)}" target="_blank" rel="noopener" data-read="${esc(it.id)}">阅读原文 ↗</a>
+      <button class="btn" data-star="${esc(it.id)}">${state.star.has(it.id) ? '★ 已收藏' : '☆ 收藏'}</button>
       <button class="btn" data-tr="${esc(it.id)}">译 / Translate</button>
-      <button class="btn" data-copy="${esc(it.link)}">Copy link</button>
+      <button class="btn" data-copy="${esc(it.link)}">复制链接</button>
     </div>
   </div>`;
 }
 
 function viewEmpty() {
-  return `<div class="empty"><div class="big">◎</div><p>No matching content</p><p style="font-size:12.5px">Try a different category, clear the search, or enable more sources in settings.</p></div>`;
+  return `<div class="empty"><div class="big">◎</div><p>没有匹配的内容</p><p style="font-size:12.5px">试试切换分类、清空搜索，或在设置中开启更多来源。</p></div>`;
 }
 
 function viewSkeleton() {
   return `<div class="skeleton">
-    <div class="sk-msg"><span class="spinner"></span> Aggregating RSS feeds, first load takes a few seconds…</div>
+    <div class="sk-msg"><span class="spinner"></span> 正在聚合 RSS 源，首次加载需要几秒…</div>
     ${Array.from({ length: 9 }, () => '<div class="sk"></div>').join('')}
   </div>`;
 }
@@ -772,18 +786,18 @@ function openItem(id) {
         <span class="src">${esc(it.source)}</span><span class="sep">·</span>
         <span>${timeAgo(it.timestamp)}</span>
         ${it.author ? `<span class="sep">·</span><span>${esc(it.author)}</span>` : ''}
-        ${it.readMinutes ? `<span class="sep">·</span><span>${it.readMinutes} min read</span>` : ''}
+        ${it.readMinutes ? `<span class="sep">·</span><span>${it.readMinutes} 分钟阅读</span>` : ''}
       </div>
       <h2>${esc(it.title)}${zhTitle(it)}</h2>
-      <div class="body">${esc(it.description || it.summary || 'This source has no summary. Click below to read the original.')}</div>
+      <div class="body">${esc(it.description || it.summary || '该来源没有摘要，点击下方阅读原文。')}</div>
     ${trActive(it) && it.summaryZh ? `<div class="body-zh">${esc(it.summaryZh)}</div>` : ''}
       ${(it.tags || []).length ? `<div class="modal-tags">${it.tags.map((t) => `<span class="badge">#${esc(t)}</span>`).join('')}</div>` : ''}
       <div class="modal-actions">
-        <a class="btn primary" href="${esc(it.link)}" target="_blank" rel="noopener">Read original ↗</a>
-        <button class="btn" data-star="${esc(it.id)}">${state.star.has(it.id) ? '★ Starred' : '☆ Star'}</button>
+        <a class="btn primary" href="${esc(it.link)}" target="_blank" rel="noopener">阅读原文 ↗</a>
+        <button class="btn" data-star="${esc(it.id)}">${state.star.has(it.id) ? '★ 已收藏' : '☆ 收藏'}</button>
         <button class="btn" data-tr="${esc(it.id)}">译 / Translate</button>
-        <button class="btn" data-copy="${esc(it.link)}">Copy link</button>
-        <button class="btn" data-close-modal>Close</button>
+        <button class="btn" data-copy="${esc(it.link)}">复制链接</button>
+        <button class="btn" data-close-modal>关闭</button>
       </div>
     </div>`;
   el.modal.hidden = false;
@@ -804,15 +818,15 @@ function selectReader(id) {
 function toggleStar(id) {
   if (state.star.has(id)) {
     state.star.delete(id);
-    toast('Removed from starred');
+    toast('已取消收藏');
   } else {
     state.star.add(id);
-    toast('Starred');
+    toast('已收藏');
   }
   saveSets();
   document.querySelectorAll(`[data-star="${CSS.escape(id)}"]`).forEach((n) => {
     if (n.classList.contains('star-btn')) n.classList.toggle('on', state.star.has(id));
-    else n.textContent = state.star.has(id) ? '★ Starred' : '☆ Star';
+    else n.textContent = state.star.has(id) ? '★ 已收藏' : '☆ 收藏';
   });
   if (state.prefs.onlyStar) render();
 }
@@ -840,7 +854,7 @@ async function loadConfig() {
     const res = await fetch(`${API_BASE}/api/config`);
     state.config = await res.json();
   } catch {
-    state.config = { categories: [{ id: 'all', name: 'All' }], feeds: [] };
+    state.config = { categories: [{ id: 'all', name: '全部' }], feeds: [] };
   }
 }
 
@@ -856,7 +870,7 @@ async function loadNews({ fresh = false } = {}) {
   if (Array.isArray(state.prefs.sources) && state.prefs.sources.length === 0) {
     state.loading = false;
     document.getElementById('refreshBtn')?.classList.remove('spin');
-    state.data = { ...state.data, items: [], count: 0, note: 'No news sources selected. Pick a few in the top-right settings.' };
+    state.data = { ...state.data, items: [], count: 0, note: '未选择任何新闻来源，请在右上角设置中勾选几个。' };
     renderNotice();
     render();
     return;
@@ -876,8 +890,8 @@ async function loadNews({ fresh = false } = {}) {
     if (!state.data.items.length) {
       el.stage.innerHTML = `<div class="fatal">
         <div class="big">⚠</div>
-        <p class="fmsg">Load failed: ${esc(err.message || err)}</p>
-        <button class="btn primary" id="retryBtn">Retry</button>
+        <p class="fmsg">加载失败：${esc(err.message || err)}</p>
+        <button class="btn primary" id="retryBtn">重试</button>
       </div>`;
       document.getElementById('retryBtn')?.addEventListener('click', () => loadNews());
     } else {
@@ -902,7 +916,7 @@ async function loadNews({ fresh = false } = {}) {
     el.stage.classList.add('stage-flash');
     setTimeout(() => el.stage.classList.remove('stage-flash'), 600);
     const up = state.data.updated ? new Date(state.data.updated) : null;
-    toast(`Refreshed · ${state.data.items.length} items${up ? ` · ${clockOf(up.getTime())}` : ''}`);
+    toast(`已刷新 · ${state.data.items.length} 条${up ? ` · ${clockOf(up.getTime())}` : ''}`);
   }
 }
 
@@ -926,7 +940,7 @@ async function loadFeeds({ fresh = false } = {}) {
     state.data = { note: '', ...data };
 
     // 社区分类（驱动顶部分类条）
-    const cats = [{ id: 'all', name: 'All' }];
+    const cats = [{ id: 'all', name: '全部' }];
     const seen = new Set();
     for (const it of state.data.items) {
       if (!seen.has(it.category)) {
@@ -942,15 +956,15 @@ async function loadFeeds({ fresh = false } = {}) {
     if (state.data.items.length === 0 && srcs.length) {
       state.data.note =
         okCount === 0
-          ? 'All community sources failed to load. RSSHub is likely blocked from the edge — try again later.'
-          : 'No community items returned this time.';
+          ? '所有社区来源均加载失败，RSSHub 可能已被边缘节点封锁，请稍后重试。'
+          : '本次未返回社区内容。';
     }
   } catch (err) {
     if (!state.data.items.length) {
       el.stage.innerHTML = `<div class="fatal">
         <div class="big">⚠</div>
-        <p class="fmsg">Load failed: ${esc(err.message || err)}</p>
-        <button class="btn primary" id="retryBtn">Retry</button>
+        <p class="fmsg">加载失败：${esc(err.message || err)}</p>
+        <button class="btn primary" id="retryBtn">重试</button>
       </div>`;
       document.getElementById('retryBtn')?.addEventListener('click', () => loadFeeds());
     } else {
@@ -972,7 +986,7 @@ async function loadFeeds({ fresh = false } = {}) {
     el.stage.classList.add('stage-flash');
     setTimeout(() => el.stage.classList.remove('stage-flash'), 600);
     const up = state.data.updated ? new Date(state.data.updated) : null;
-    toast(`Refreshed · ${state.data.items.length} items${up ? ` · ${clockOf(up.getTime())}` : ''}`);
+    toast(`已刷新 · ${state.data.items.length} 条${up ? ` · ${clockOf(up.getTime())}` : ''}`);
   }
 }
 
@@ -1020,7 +1034,7 @@ function bind() {
     render();
   });
 
-  // 模式切换（Tech & AI / Community）
+  // 模式切换（科技资讯 / 社区热点）
   el.modes.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-mode]');
     if (!btn) return;
@@ -1031,8 +1045,8 @@ function bind() {
     document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
     el.brandSub.textContent =
       m === 'community'
-        ? 'Community'
-        : LAYOUTS.find((l) => l.id === state.prefs.layout)?.name || 'News';
+        ? '社区热点'
+        : LAYOUTS.find((l) => l.id === state.prefs.layout)?.name || '资讯';
     if (m === 'community') loadFeeds(); // 切换即加载对应数据
     else loadNews();
   });
@@ -1075,7 +1089,7 @@ function bind() {
     state.prefs.theme = order[(order.indexOf(cur) + 1) % order.length];
     savePrefs();
     applyTheme();
-    toast(state.prefs.theme === 'dark' ? 'Dark mode' : 'Light mode');
+    toast(state.prefs.theme === 'dark' ? '深色模式' : '浅色模式');
   });
   $('#settingsBtn').addEventListener('click', () => {
     el.panel.hidden = false;
@@ -1086,11 +1100,11 @@ function bind() {
     savePrefs();
     $('#trBtn').classList.toggle('on', state.prefs.translate);
     if (state.prefs.translate) {
-      toast('Translating visible items…');
+      toast('正在翻译可见条目…');
       translateVisible();
     } else {
       render();
-      toast('Bilingual off');
+      toast('已关闭双语');
     }
   });
   $('#panelClose').addEventListener('click', closeOverlays);
@@ -1105,7 +1119,7 @@ function bind() {
     const tr = e.target.closest('[data-tr]');
     if (tr) { translateAndShow(tr.dataset.tr); return; }
     const copy = e.target.closest('[data-copy]');
-    if (copy) { navigator.clipboard?.writeText(copy.dataset.copy); toast('Link copied'); }
+    if (copy) { navigator.clipboard?.writeText(copy.dataset.copy); toast('链接已复制'); }
   });
 
   // 偏好开关
@@ -1152,7 +1166,7 @@ function bind() {
     state.prefs.sources = [];
     savePrefs();
     renderSources();
-    toast('All sources unchecked — select at least one to see content');
+    toast('已取消所有来源，至少选择一个才能看到内容');
   });
   $('#srcReset').addEventListener('click', () => {
     state.prefs.sources = null;
@@ -1212,7 +1226,7 @@ async function boot() {
     $('#trBtn')?.classList.toggle('on', state.prefs.translate);
     el.sort.value = state.prefs.sort;
     document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('on', b.dataset.mode === state.prefs.mode));
-    if (state.prefs.mode === 'community') el.brandSub.textContent = 'Community';
+    if (state.prefs.mode === 'community') el.brandSub.textContent = '社区热点';
     bind();
     render();
     await loadConfig();
