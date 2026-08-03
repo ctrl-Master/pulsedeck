@@ -23,8 +23,12 @@ import { buildSampleData } from '../shared/sample-data.js';
 import { placeholderSVG } from '../shared/placeholder.js';
 import { escapeXml } from '../shared/escape.js';
 
-const TRANSLATOR = makeTranslator({});
-const SUMMARIZER = makeSummarizer({}, TRANSLATOR);
+// Vercel 上无 Workers AI 绑定；注入即时空操作假 env.AI，让翻译/摘要走 no-op 分支，
+// 避免服务端向 MyMemory 发 ~60 次慢请求（Edge 25s 硬上限必超时 → FUNCTION_INVOCATION_TIMEOUT）。
+// 真正的「英译中」由前端在浏览器侧用 MyMemory 完成（见 public/app.js 的 translateVisible）。
+const ENV = { AI: { async run() { return {}; } } };
+const TRANSLATOR = makeTranslator(ENV);
+const SUMMARIZER = makeSummarizer(ENV, TRANSLATOR);
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -138,10 +142,8 @@ export default async function handler(req) {
   }
 }
 
-// Vercel 现行标准写法：顶层 `runtime` / `maxDuration` 导出，
-// 路由到新一代 Fluid Node 运行时（对 ESM 的 api/ 函数支持良好）。
-// 注意：旧的 `export const config = { runtime: 'nodejs' }` 写法会把函数
-// 路由到老的 @vercel/node 构建器，对 "type":"module" + 相对 ESM 导入的
-// api/ 函数处理有兼容问题，导致模块加载即崩溃（FUNCTION_INVOCATION_FAILED）。
-export const runtime = 'nodejs';
-export const maxDuration = 60;
+// 用 Edge 运行时（已验证可正常加载这份 ESM 函数；Node 运行时在 Vercel 上对
+// "type":"module" + 相对 ESM 导入的 api/ 函数存在加载崩溃问题）。
+// Edge 硬上限 25s，故上方注入假 env.AI 跳过服务端 MyMemory 翻译，避免超时；
+// 中英翻译由前端浏览器侧完成。
+export const runtime = 'edge';
