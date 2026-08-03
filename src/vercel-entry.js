@@ -142,8 +142,9 @@ export default async function handler(req) {
   }
 }
 
-// 用 Edge 运行时（已验证可正常加载这份 ESM 函数；Node 运行时在 Vercel 上对
-// "type":"module" + 相对 ESM 导入的 api/ 函数存在加载崩溃问题）。
-// Edge 硬上限 25s，故上方注入假 env.AI 跳过服务端 MyMemory 翻译，避免超时；
-// 中英翻译由前端浏览器侧完成。
-export const runtime = 'edge';
+// 用 Node.js 运行时：Vercel 的 Node 18+/20 运行时原生提供 fetch / Request /
+// Response / URL / AbortSignal 等 Web 标准全局，本函数零 Node 专用 API，
+// 因此在 Node 运行时下最稳定（已用本地 Node 22 实测全路由 200）。
+// 服务端翻译仍走「假 env.AI」no-op，真正的英译中由前端浏览器侧 MyMemory 完成。
+export const runtime = 'nodejs';
+export const maxDuration = 60;

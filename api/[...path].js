@@ -1,4 +1,4 @@
-/* Pulsedeck · Vercel 部署产物（自包含单文件） * 源文件: src/vercel-entry.js + shared/* * 重新生成: node scripts/bundle-vercel.mjs * 说明: Vercel 打包器无法稳定处理 api/ 对 ../shared 的跨目录 ESM 导入, *       故部署前用 esbuild 把入口与 shared 打成一个零依赖文件。 */
+/* Pulsedeck Vercel deploy bundle (self-contained). Source: src/vercel-entry.js + shared/*. Regenerate: node scripts/bundle-vercel.mjs */
 
 // shared/feeds.js
 var CATEGORIES = [
@@ -1264,8 +1264,10 @@ async function handler(req) {
     return json({ ok: false, error: String(e && e.message || e) }, 500);
   }
 }
-var runtime = "edge";
+var runtime = "nodejs";
+var maxDuration = 60;
 export {
   handler as default,
+  maxDuration,
   runtime
 };
