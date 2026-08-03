@@ -32,7 +32,7 @@ vercel --prod     # 生产环境
 
 保持**完全一致的功能与界面**，仅后端运行环境不同：
 
-- **翻译 / 摘要（Vercel 上已禁用）**：原代码在无 `env.AI` 时会降级到 MyMemory 免费接口，但默认全源约 200 条英文 × 2 次调用 ≈ **480 次 MyMemory 网络请求**，免费额度很快 429，叠加起来会超出 Vercel 免费版 Edge Function 的 **25 秒硬上限**（实测 `/api/news` 返回 `FUNCTION_INVOCATION_TIMEOUT`，页面因此「能打开却没数据」）。适配层因此注入一个即时空操作的假 `env.AI`，让翻译/摘要在 Vercel 上走 Workers AI 分支（不发 MyMemory 请求、调用直接返回），彻底消除那 480 次慢请求。代价：**英文条目在 Vercel 上显示原文（不做中文翻译）**，其余功能/格式/内容不变。若要坚持中文翻译，请改用 Cloudflare Workers（天然带 Workers AI），或在 Vercel 上接入真实翻译后端并自行放宽超时。
+- **中英双语翻译（客户端按需，服务端仍不批量翻译）**：服务端为避开 Vercel 25s Edge 限制，适配层注入即空操作的假 `env.AI`，翻译/摘要在 Vercel 上走 Workers AI 分支（不发 MyMemory 请求、调用直接返回），因此聚合接口本身不翻译（英文条目默认显示原文）。但前端新增了**客户端按需翻译**：点顶栏 🌐（快捷键 `G`）批量翻译当前可见前 30 条，或点每条卡片/弹窗里的「译 / EN」按钮单独翻译；译文经 MyMemory 公共接口**由浏览器直连**（CORS 开放），不经过服务端、不占用 Edge Function 超时。英文源译中、中文源译英，译文随会话缓存。免费匿名额度约 5000 词/日，超额的条目会自动跳过、页面照常显示原文。
 - **缓存**：`/api/news` 的 5 分钟边缘缓存退化为函数实例内的内存缓存（Vercel Edge 未提供 `caches.default` 时自动垫片），功能不受影响。
 - **图片代理 `/api/img`**：照常工作（Vercel 函数有出网能力）。
 - **静态资源**：由 Vercel 直接托管 `public/`，同源无跨域问题，`API_BASE` 保持为空即可。
@@ -55,5 +55,5 @@ vercel --prod     # 生产环境
 ### 自定义域名
 Vercel 项目 → **Settings → Domains** 绑定自己的域名即可。
 
-### 提升翻译额度（可选）
-在 Vercel 项目 **Settings → Environment Variables** 加入 `MYMEMORY_KEY`（MyMemory 免费注册获取），日翻译额度从 ~5000 词提升到 ~50000 词。不填也能跑。
+### 提升翻译额度（客户端，可选）
+前端翻译走 MyMemory 公共接口。匿名约 5000 词/日，超额的条目会自动跳过（页面照常显示原文）。若要提额，在 `public/app.js` 的 `translateText()` 请求里加上 `&key=你的MYMEMORY_KEY` 即可；但密钥会出现在浏览器端，**仅适合个人/自托管站点**，公开站点请勿泄露密钥。

@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="light">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#ffffff" />
-<meta name="description" content="Pulsedeck · 科技 / AI / 创投热点聚合，六种阅读布局自由切换" />
-<title>Pulsedeck · 热点聚合</title>
+<meta name="description" content="Pulsedeck · Tech / AI / startup hot-topic aggregator with six reading layouts" />
+<title>Pulsedeck · Tech & AI News Digest</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M6 20l4-8 4 5 3-9 4 12 5-6' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="./styles.css" />
 </head>
@@ -14,39 +14,40 @@
 <!-- ======================= 顶栏 ======================= -->
 <header class="topbar" id="topbar">
   <div class="topbar-inner">
-    <a class="brand" href="#" id="brandHome" title="回到顶部">
+    <a class="brand" href="#" id="brandHome" title="Back to top">
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 32 32"><path d="M4 20l5-9 4 6 4-11 4 14 3-5h4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </span>
       <span class="brand-text">
         <strong>Pulsedeck</strong>
-        <em id="brandSub">热点聚合</em>
+        <em id="brandSub">News Digest</em>
       </span>
     </a>
 
     <div class="search" role="search">
       <svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      <input id="search" type="search" placeholder="搜索标题、来源、关键词…  （按 / 聚焦）" autocomplete="off" spellcheck="false" />
-      <button class="search-clear" id="searchClear" hidden aria-label="清空搜索">✕</button>
+      <input id="search" type="search" placeholder="Search titles, sources, keywords…  (press /)" autocomplete="off" spellcheck="false" />
+      <button class="search-clear" id="searchClear" hidden aria-label="Clear search">✕</button>
     </div>
 
     <div class="actions">
-      <div class="select-wrap" title="排序方式">
-        <select id="sort" aria-label="排序方式">
-          <option value="time">最新优先</option>
-          <option value="hot">重点优先</option>
-          <option value="source">按来源分组</option>
-          <option value="read">最短读完</option>
+      <div class="select-wrap" title="Sort">
+        <select id="sort" aria-label="Sort">
+          <option value="time">Latest</option>
+          <option value="hot">Top</option>
+          <option value="source">By source</option>
+          <option value="read">Quickest read</option>
         </select>
       </div>
-      <button class="icon-btn" id="refreshBtn" title="刷新 (R)" aria-label="刷新">
+      <button class="icon-btn" id="refreshBtn" title="Refresh (R)" aria-label="Refresh">
         <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <button class="icon-btn" id="themeBtn" title="切换主题 (T)" aria-label="切换主题">
+      <button class="icon-btn" id="themeBtn" title="Toggle theme (T)" aria-label="Toggle theme">
         <svg viewBox="0 0 24 24" class="i-sun"><circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2.6M12 19.4V22M2 12h2.6M19.4 12H22M4.9 4.9l1.9 1.9M17.2 17.2l1.9 1.9M19.1 4.9l-1.9 1.9M6.8 17.2l-1.9 1.9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <svg viewBox="0 0 24 24" class="i-moon"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
       </button>
-      <button class="icon-btn" id="settingsBtn" title="源与偏好 (S)" aria-label="设置">
+      <button class="icon-btn" id="trBtn" title="Bilingual EN⇄ZH (G)" aria-label="Translate">🌐</button>
+      <button class="icon-btn" id="settingsBtn" title="Sources & Preferences (S)" aria-label="Settings">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.6 1.6 0 0 0 .32 1.77l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-1 1.47V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9.1 19.4a1.6 1.6 0 0 0-1.77.32l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.6 1.6 0 0 0 .32-1.77 1.6 1.6 0 0 0-1.47-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.47-1.05 1.6 1.6 0 0 0-.32-1.77l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.6 1.6 0 0 0 1.77.32H9a1.6 1.6 0 0 0 1-1.47V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.47 1.6 1.6 0 0 0 1.77-.32l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.6 1.6 0 0 0-.32 1.77V9a1.6 1.6 0 0 0 1.47 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
       </button>
     </div>
@@ -54,8 +55,8 @@
 
   <!-- 分类 + 布局切换 -->
   <div class="subbar">
-    <div class="cats" id="cats" role="tablist" aria-label="分类"></div>
-    <div class="layouts" id="layouts" role="group" aria-label="布局"></div>
+    <div class="cats" id="cats" role="tablist" aria-label="Categories"></div>
+    <div class="layouts" id="layouts" role="group" aria-label="Layout"></div>
   </div>
 </header>
 
@@ -66,69 +67,69 @@
 <main class="stage" id="stage" data-layout="cards" aria-live="polite">
   <div class="boot-fallback" id="bootFallback">
     <div class="spinner" aria-hidden="true"></div>
-    <p>正在加载 Pulsedeck…</p>
-    <small>若长时间无内容，请用浏览器直接打开 <code>http://localhost:5174</code></small>
+    <p>Loading Pulsedeck…</p>
+    <small>If nothing shows for a while, open <code>http://localhost:5174</code> directly in your browser</small>
   </div>
 </main>
 
 <footer class="foot">
   <span id="footStat">—</span>
   <span class="dot">·</span>
-  <span>数据来自各站公开 RSS，版权归原作者</span>
+  <span>Content from public RSS feeds. Copyright belongs to the original authors.</span>
   <span class="dot">·</span>
-  <a href="/api/rss" target="_blank" rel="noopener">导出聚合 RSS</a>
+  <a href="/api/rss" target="_blank" rel="noopener">Export RSS</a>
 </footer>
 
 <!-- ======================= 移动端底部布局条 ======================= -->
-<nav class="mobile-bar" id="mobileBar" aria-label="布局切换"></nav>
+<nav class="mobile-bar" id="mobileBar" aria-label="Layout switcher"></nav>
 
 <!-- ======================= 设置抽屉 ======================= -->
 <div class="scrim" id="scrim" hidden></div>
-<aside class="panel" id="panel" hidden aria-label="源与偏好">
+<aside class="panel" id="panel" hidden aria-label="Sources & Preferences">
   <div class="panel-head">
-    <h2>源与偏好</h2>
-    <button class="icon-btn" id="panelClose" aria-label="关闭">✕</button>
+    <h2>Sources & Preferences</h2>
+    <button class="icon-btn" id="panelClose" aria-label="Close">✕</button>
   </div>
 
   <div class="panel-body">
     <section class="panel-sec">
-      <h3>阅读偏好</h3>
-      <label class="switch"><input type="checkbox" id="optCompact" /><span>紧凑密度</span></label>
-      <label class="switch"><input type="checkbox" id="optHideRead" /><span>隐藏已读条目</span></label>
-      <label class="switch"><input type="checkbox" id="optImages" checked /><span>显示配图</span></label>
-      <label class="switch"><input type="checkbox" id="optProxy" /><span>图片走边缘代理（图裂时开）</span></label>
-      <label class="switch"><input type="checkbox" id="optOnlyStar" /><span>只看收藏</span></label>
+      <h3>Reading preferences</h3>
+      <label class="switch"><input type="checkbox" id="optCompact" /><span>Compact density</span></label>
+      <label class="switch"><input type="checkbox" id="optHideRead" /><span>Hide read items</span></label>
+      <label class="switch"><input type="checkbox" id="optImages" checked /><span>Show images</span></label>
+      <label class="switch"><input type="checkbox" id="optProxy" /><span>Route images via edge proxy (if broken)</span></label>
+      <label class="switch"><input type="checkbox" id="optOnlyStar" /><span>Starred only</span></label>
     </section>
 
     <section class="panel-sec">
-      <h3>屏蔽关键词</h3>
-      <input class="text-input" id="optBlock" type="text" placeholder="用逗号分隔，例如：加密货币, 财报" />
-      <p class="hint">标题命中任意一个词的条目会被隐藏。</p>
+      <h3>Blocked keywords</h3>
+      <input class="text-input" id="optBlock" type="text" placeholder="Comma-separated, e.g. crypto, earnings" />
+      <p class="hint">Items whose title matches any of these words will be hidden.</p>
     </section>
 
     <section class="panel-sec">
       <div class="sec-head">
-        <h3>新闻源</h3>
+        <h3>News sources</h3>
         <div class="sec-actions">
-          <button class="mini-btn" id="srcAll">全选</button>
-          <button class="mini-btn" id="srcNone">全不选</button>
-          <button class="mini-btn" id="srcReset">恢复默认</button>
+          <button class="mini-btn" id="srcAll">All</button>
+          <button class="mini-btn" id="srcNone">None</button>
+          <button class="mini-btn" id="srcReset">Reset</button>
         </div>
       </div>
       <div id="srcList" class="src-list"></div>
     </section>
 
     <section class="panel-sec">
-      <h3>快捷键</h3>
+      <h3>Shortcuts</h3>
       <ul class="keys">
-        <li><kbd>1</kbd>–<kbd>6</kbd> 切换布局</li>
-        <li><kbd>/</kbd> 搜索　<kbd>R</kbd> 刷新　<kbd>T</kbd> 主题</li>
-        <li><kbd>J</kbd>/<kbd>K</kbd> 上下选中　<kbd>Enter</kbd> 打开</li>
-        <li><kbd>S</kbd> 设置　<kbd>Esc</kbd> 关闭</li>
+        <li><kbd>1</kbd>–<kbd>6</kbd> Switch layout</li>
+        <li><kbd>/</kbd> Search　<kbd>R</kbd> Refresh　<kbd>T</kbd> Theme</li>
+        <li><kbd>J</kbd>/<kbd>K</kbd> Move up/down　<kbd>Enter</kbd> Open</li>
+        <li><kbd>S</kbd> Settings　<kbd>Esc</kbd> Close</li>
       </ul>
     </section>
 
-    <p class="panel-foot">Pulsedeck · 部署在 Cloudflare Workers，抓取全部发生在边缘节点。</p>
+    <p class="panel-foot">Pulsedeck · Deployed on Vercel, fetching at the edge.</p>
   </div>
 </aside>
 

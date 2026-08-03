@@ -322,6 +322,23 @@ button { cursor: pointer; border: none; background: none; }
 .star-btn.on { color: #f59e0b; }
 .star-btn.on svg { fill: currentColor; }
 
+/* 单条「翻译」按钮 + 顶栏双语开关高亮 */
+.tr-btn {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  flex-shrink: 0;
+  transition: all .15s;
+}
+.tr-btn:hover { background: var(--surface-3); color: var(--accent); border-color: var(--accent); }
+.tr-btn.on { color: #fff; background: var(--accent); border-color: var(--accent); }
+#trBtn.on { color: var(--accent); }
+
 .is-read .ttl { color: var(--muted) !important; }
 .is-read .thumb { opacity: .55; }
 

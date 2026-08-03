@@ -16,12 +16,12 @@
  */
 
 export const CATEGORIES = [
-  { id: 'all', name: '全部', short: '全部' },
-  { id: 'tech', name: '综合科技', short: '科技' },
-  { id: 'ai', name: 'AI 前沿', short: 'AI' },
-  { id: 'dev', name: '开发者', short: '开发' },
-  { id: 'business', name: '创投商业', short: '创投' },
-  { id: 'cn', name: '中文源', short: '中文' },
+  { id: 'all', name: 'All', short: 'All' },
+  { id: 'tech', name: 'Tech', short: 'Tech' },
+  { id: 'ai', name: 'AI', short: 'AI' },
+  { id: 'dev', name: 'Developer', short: 'Dev' },
+  { id: 'business', name: 'Business', short: 'Biz' },
+  { id: 'cn', name: 'Chinese', short: '中文' },
 ];
 
 export const FEEDS = [
@@ -65,6 +65,26 @@ export const FEEDS = [
     lang: 'en',
     enabled: true,
     weight: 10,
+  },
+  {
+    id: 'wired',
+    name: 'Wired',
+    category: 'tech',
+    url: 'https://www.wired.com/feed/rss',
+    home: 'https://www.wired.com',
+    lang: 'en',
+    enabled: true,
+    weight: 8,
+  },
+  {
+    id: 'bbc-tech',
+    name: 'BBC Technology',
+    category: 'tech',
+    url: 'https://feeds.bbci.co.uk/news/technology/rss.xml',
+    home: 'https://www.bbc.com/technology',
+    lang: 'en',
+    enabled: true,
+    weight: 7,
   },
   {
     id: 'engadget',
@@ -138,6 +158,26 @@ export const FEEDS = [
     enabled: false,
     weight: 7,
   },
+  {
+    id: 'nvidia-blog',
+    name: 'NVIDIA Blog',
+    category: 'ai',
+    url: 'https://blogs.nvidia.com/feed/',
+    home: 'https://blogs.nvidia.com',
+    lang: 'en',
+    enabled: false,
+    weight: 7,
+  },
+  {
+    id: 'the-decoder',
+    name: 'The Decoder',
+    category: 'ai',
+    url: 'https://the-decoder.com/feed/',
+    home: 'https://the-decoder.com',
+    lang: 'en',
+    enabled: false,
+    weight: 6,
+  },
 
   /* ---------------- 开发者 ---------------- */
   {
@@ -180,6 +220,26 @@ export const FEEDS = [
     enabled: false,
     weight: 6,
   },
+  {
+    id: 'aws-blog',
+    name: 'AWS Blog',
+    category: 'dev',
+    url: 'https://aws.amazon.com/blogs/aws/feed/',
+    home: 'https://aws.amazon.com/blogs/aws/',
+    lang: 'en',
+    enabled: false,
+    weight: 6,
+  },
+  {
+    id: 'kubernetes-blog',
+    name: 'Kubernetes Blog',
+    category: 'dev',
+    url: 'https://kubernetes.io/feed.xml',
+    home: 'https://kubernetes.io/blog/',
+    lang: 'en',
+    enabled: false,
+    weight: 6,
+  },
 
   /* ---------------- 创投商业 ---------------- */
   {
@@ -211,6 +271,16 @@ export const FEEDS = [
     lang: 'en',
     enabled: false,
     weight: 6,
+  },
+  {
+    id: 'yc-blog',
+    name: 'Y Combinator',
+    category: 'business',
+    url: 'https://www.ycombinator.com/blog/rss.xml',
+    home: 'https://www.ycombinator.com/blog',
+    lang: 'en',
+    enabled: false,
+    weight: 7,
   },
 
   /* ---------------- 中文源 ---------------- */
@@ -273,6 +343,26 @@ export const FEEDS = [
     lang: 'zh',
     enabled: false,
     weight: 5,
+  },
+  {
+    id: '36kr',
+    name: '36氪',
+    category: 'cn',
+    url: 'https://36kr.com/feed',
+    home: 'https://36kr.com',
+    lang: 'zh',
+    enabled: false,
+    weight: 6,
+  },
+  {
+    id: 'qbitai',
+    name: '量子位',
+    category: 'cn',
+    url: 'https://www.qbitai.com/feed',
+    home: 'https://www.qbitai.com',
+    lang: 'zh',
+    enabled: false,
+    weight: 7,
   },
 ];
 

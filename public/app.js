@@ -17,12 +17,12 @@ const ICON = {
 };
 
 const LAYOUTS = [
-  { id: 'cards', name: '卡片流', hint: '缩略图优先，扫视效率最高' },
-  { id: 'list', name: '列表', hint: '信息密度最高，手机单手最舒服' },
-  { id: 'magazine', name: '杂志', hint: '头条大图 + 混排，像一份日报' },
-  { id: 'board', name: '看板', hint: '按分类分栏，横向对比' },
-  { id: 'timeline', name: '时间轴', hint: '按时间线索追踪事件' },
-  { id: 'reader', name: '阅读器', hint: '左索引右正文，PC 连读' },
+  { id: 'cards', name: 'Cards', hint: 'Thumbnail-first, fastest to scan' },
+  { id: 'list', name: 'List', hint: 'Highest density, great one-handed on mobile' },
+  { id: 'magazine', name: 'Magazine', hint: 'Big hero image + mixed layout, like a daily' },
+  { id: 'board', name: 'Board', hint: 'Columns by category, side-by-side compare' },
+  { id: 'timeline', name: 'Timeline', hint: 'Track events along a time axis' },
+  { id: 'reader', name: 'Reader', hint: 'Index on the left, article on the right' },
 ];
 
 const STAR_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 3.6l2.6 5.3 5.8.85-4.2 4.1 1 5.8-5.2-2.73L6.8 19.6l1-5.8-4.2-4.1 5.8-.85z"/></svg>';
@@ -35,13 +35,13 @@ function surfaceError(msg) {
   s.innerHTML = `<div class="fatal">
     <div class="big">⚠</div>
     <p class="fmsg">${esc(msg)}</p>
-    <button class="btn primary" onclick="location.reload()">重新加载</button>
+    <button class="btn primary" onclick="location.reload()">Reload</button>
   </div>`;
 }
-window.addEventListener('error', (e) => surfaceError('页面脚本出错：' + (e.message || (e.error && e.error.message) || '未知错误')));
+window.addEventListener('error', (e) => surfaceError('Script error: ' + (e.message || (e.error && e.error.message) || 'unknown error')));
 window.addEventListener('unhandledrejection', (e) => {
   const r = e.reason;
-  surfaceError('请求或渲染失败：' + (r && (r.message || r)) || '未知错误');
+  surfaceError('Request or render failed: ' + (r && (r.message || r)) || 'unknown error');
 });
 
 /* ------------------------- 状态 ------------------------- */
@@ -57,6 +57,7 @@ const DEFAULT_PREFS = {
   proxy: false,
   onlyStar: false,
   block: '',
+  translate: false, // 客户端中英双语翻译总开关
   sources: null, // null = 用服务端默认
 };
 
@@ -145,15 +146,15 @@ function timeAgo(ts) {
   if (!ts) return '';
   const diff = Date.now() - ts;
   const m = Math.floor(diff / 60000);
-  if (m < 1) return '刚刚';
-  if (m < 60) return `${m} 分钟前`;
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时前`;
+  if (h < 24) return `${h}h ago`;
   const d = new Date(ts);
   const days = Math.floor(h / 24);
-  if (days === 1) return `昨天 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  if (days < 7) return `${days} 天前`;
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+  if (days === 1) return `Yesterday ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  if (days < 7) return `${days}d ago`;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 function clockOf(ts) {
@@ -166,10 +167,10 @@ function dayLabel(ts) {
   const today = new Date();
   const same = (a, b) => a.toDateString() === b.toDateString();
   const y = new Date(today.getTime() - 86400000);
-  if (same(d, today)) return '今天';
-  if (same(d, y)) return '昨天';
-  const week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${week}`;
+  if (same(d, today)) return 'Today';
+  if (same(d, y)) return 'Yesterday';
+  const week = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+  return `${d.getMonth() + 1}/${d.getDate()} ${week}`;
 }
 
 function imgSrc(item, i = 0) {
@@ -190,6 +191,72 @@ function toast(msg) {
   el.toast.hidden = false;
   clearTimeout(toast._t);
   toast._t = setTimeout(() => { el.toast.hidden = true; }, 1900);
+}
+
+/* ------------------------- 中英双语翻译（客户端按需，绕过 Vercel 25s Edge 限制） ------------------------- */
+
+// 客户端直连 MyMemory 公共翻译接口（CORS 开放），避免在服务端一次性翻译几百条导致超时。
+const trCache = new Map();
+
+function trPair(lang) {
+  // EN 源 → 译中；ZH 源 → 译英
+  return lang === 'zh' ? 'zh-CN|en' : 'en|zh-CN';
+}
+
+function trActive(it) {
+  return state.prefs.translate || it._tr;
+}
+
+async function translateText(text, pair) {
+  const src = String(text || '').trim();
+  if (!src) return '';
+  const key = `${pair}::${src}`;
+  if (trCache.has(key)) return trCache.get(key);
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(src.slice(0, 480))}&langpair=${pair}`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined });
+    if (!res.ok) { trCache.set(key, ''); return ''; }
+    const j = await res.json();
+    const t = j?.responseData?.translatedText || '';
+    if (/MYMEMORY WARNING/i.test(t)) { trCache.set(key, ''); return ''; } // 免费额度耗尽
+    const out = String(t).trim();
+    trCache.set(key, out);
+    return out;
+  } catch {
+    trCache.set(key, '');
+    return '';
+  }
+}
+
+async function translateItem(it) {
+  if (!it || it._tr) return;
+  const pair = trPair(it.lang);
+  const [titleZh, summaryZh] = await Promise.all([
+    translateText(it.title, pair),
+    it.summary ? translateText(it.summary, pair) : Promise.resolve(''),
+  ]);
+  if (titleZh) it.titleZh = titleZh;
+  if (summaryZh) it.summaryZh = summaryZh;
+  it._tr = true;
+}
+
+async function translateVisible() {
+  // 免费额度有限，先译当前可见的前 30 条；已译过的走缓存秒回。
+  const list = visibleItems().slice(0, 30);
+  const CONC = 5;
+  for (let i = 0; i < list.length; i += CONC) {
+    const batch = list.slice(i, i + CONC);
+    await Promise.all(batch.map((it) => translateItem(it)));
+  }
+  render();
+}
+
+async function translateAndShow(id) {
+  const it = state.data.items.find((x) => x.id === id);
+  if (!it) return;
+  await translateItem(it);
+  render();
+  toast(it.lang === 'zh' ? 'Translated to EN' : 'Translated to ZH');
 }
 
 /* ------------------------- 主题 ------------------------- */
@@ -262,7 +329,7 @@ function categoryCounts() {
 
 function renderCats() {
   const counts = categoryCounts();
-  const cats = state.config.categories.length ? state.config.categories : [{ id: 'all', name: '全部' }];
+  const cats = state.config.categories.length ? state.config.categories : [{ id: 'all', name: 'All' }];
   el.cats.innerHTML = cats
     .map((c) => {
       const n = c.id === 'all' ? state.data.items.length : counts.get(c.id) || 0;
@@ -278,7 +345,7 @@ function layoutButtonsHTML(mobile) {
     const svg = `<svg viewBox="0 0 24 24" fill="currentColor">${ICON[l.id]}</svg>`;
     return mobile
       ? `<button class="mb-btn${on}" data-layout="${l.id}">${svg}<span>${l.name}</span></button>`
-      : `<button class="lay-btn${on}" data-layout="${l.id}" title="${esc(l.hint)}（快捷键 ${i + 1}）">${svg}<span>${l.name}</span></button>`;
+      : `<button class="lay-btn${on}" data-layout="${l.id}" title="${esc(l.hint)} (Shortcut ${i + 1})">${svg}<span>${l.name}</span></button>`;
   }).join('');
 }
 
@@ -293,7 +360,7 @@ function renderNotice() {
   // 抓取失败的源不再单独提示（顶部不再显示“X 个源本次抓取失败”）。
   const parts = [];
   if (state.data.note) parts.push(state.data.note);
-  else if (state.data.demo) parts.push('当前展示的是演示数据。');
+  else if (state.data.demo) parts.push('Demo data is shown.');
   if (parts.length) {
     el.notice.innerHTML = parts.join(' ');
     el.notice.hidden = false;
@@ -306,9 +373,8 @@ function renderFoot(list) {
   const ok = (state.data.sources || []).filter((s) => s.ok).length;
   const total = (state.data.sources || []).length;
   const up = state.data.updated ? new Date(state.data.updated) : null;
-  const tr = state.data.translate;
-  const trLabel = tr === 'workers-ai' ? 'Workers AI 翻译' : tr === 'mymemory' ? 'MyMemory 翻译' : '';
-  el.footStat.textContent = `显示 ${list.length} / 共 ${state.data.items.length} 条 · ${ok}/${total} 个源可用${up ? ` · 更新于 ${clockOf(up.getTime())}` : ''}${trLabel ? ` · 英文已${trLabel}` : ''}`;
+  const bi = state.prefs.translate ? ' · Bilingual on' : '';
+  el.footStat.textContent = `Showing ${list.length} / ${state.data.items.length} · ${ok}/${total} sources${up ? ` · updated ${clockOf(up.getTime())}` : ''}${bi}`;
 }
 
 function renderSources() {
@@ -327,7 +393,7 @@ function renderSources() {
       const rows = feeds
         .map((f) => {
           const s = stat.get(f.id);
-          const info = s ? (s.ok ? `${s.count} 条` : '失败') : '—';
+          const info = s ? (s.ok ? `${s.count}` : 'failed') : '—';
           const bad = s && !s.ok ? ' bad' : '';
           return `<label class="src-item">
             <input type="checkbox" data-src="${f.id}" ${enabled.has(f.id) ? 'checked' : ''} />
@@ -346,7 +412,7 @@ function renderSources() {
 function metaHTML(it, extra = '') {
   const bits = [`<span class="src">${esc(it.source)}</span>`];
   if (it.timestamp) bits.push(`<span>${timeAgo(it.timestamp)}</span>`);
-  if (it.readMinutes) bits.push(`<span>${it.readMinutes} 分钟读完</span>`);
+  if (it.readMinutes) bits.push(`<span>${it.readMinutes} min read</span>`);
   if (it.points) bits.push(`<span>▲ ${it.points}</span>`);
   if (extra) bits.push(extra);
   return `<div class="meta">${bits.join('<span class="sep">·</span>')}</div>`;
@@ -354,7 +420,7 @@ function metaHTML(it, extra = '') {
 
 function starHTML(it) {
   const on = state.star.has(it.id) ? ' on' : '';
-  return `<button class="star-btn${on}" data-star="${it.id}" aria-label="收藏">${STAR_SVG}</button>`;
+  return `<button class="star-btn${on}" data-star="${it.id}" aria-label="Star">${STAR_SVG}</button>`;
 }
 
 function cls(it) {
@@ -370,12 +436,19 @@ function thumbHTML(it, i) {
 
 /* 中文译文：英文条目聚合时已自动翻译（titleZh / summaryZh），这里负责呈现 */
 function zhTitle(it) {
-  if (!it.titleZh || it.titleZh === it.title) return '';
+  if (!trActive(it) || !it.titleZh || it.titleZh === it.title) return '';
   return `<span class="zh ttl-zh">${esc(it.titleZh)}</span>`;
 }
 function zhSummary(it) {
-  if (!it.summaryZh || it.summaryZh === it.summary) return '';
+  if (!trActive(it) || !it.summaryZh || it.summaryZh === it.summary) return '';
   return `<span class="zh sum-zh">${esc(it.summaryZh)}</span>`;
+}
+
+/* 单条「翻译」按钮：EN 源标注「译」，ZH 源标注「EN」 */
+function trBtnHTML(it) {
+  const on = it._tr ? ' on' : '';
+  const label = it.lang === 'zh' ? 'EN' : 'ZH';
+  return `<button class="tr-btn${on}" data-tr="${esc(it.id)}" title="翻译 / Translate" aria-label="Translate">${label}</button>`;
 }
 
 /* 卡片主摘要：优先显示「中文汇总 digest」（部署=AI 凝练，本地=译文/原文），
@@ -385,9 +458,13 @@ function summaryHTML(it) {
   if (!text) return '';
   const isChinese = /[一-鿿]/.test(text);
   let tag = '';
-  if (it.lang === 'en') tag = isChinese ? '<span class="tag-zh">译</span>' : '<span class="tag-zh en">原文</span>';
-  else if (it.digest && it.digest !== it.summary) tag = '<span class="tag-zh">汇</span>';
-  return `<p class="sum">${esc(text)} ${tag}</p>`;
+  if (it.lang === 'en') tag = isChinese ? '<span class="tag-zh">ZH</span>' : '<span class="tag-zh en">EN</span>';
+  else if (it.digest && it.digest !== it.summary) tag = '<span class="tag-zh zh">ZH</span>';
+  let zh = '';
+  if (trActive(it) && it.summaryZh && it.summaryZh !== it.summary) {
+    zh = `<span class="zh sum-zh">${esc(it.summaryZh)}</span>`;
+  }
+  return `<p class="sum">${esc(text)} ${tag}${zh}</p>`;
 }
 
 /* ------------------------- 渲染：六种布局 ------------------------- */
@@ -404,6 +481,7 @@ function viewCards(list) {
         <div class="card-foot">
           <span class="badge">${esc(it.author || it.source)}</span>
           ${starHTML(it)}
+          ${trBtnHTML(it)}
         </div>
       </div>
     </article>`
@@ -423,6 +501,7 @@ function viewList(list) {
       </div>
       ${thumbHTML(it, i)}
       ${starHTML(it)}
+      ${trBtnHTML(it)}
     </article>`
     )
     .join('')}</div>`;
@@ -443,10 +522,11 @@ function viewMagazine(list) {
       <article class="mag-hero${cls(hero)}" data-id="${esc(hero.id)}">
         ${heroImg}
         <div class="mag-hero-body">
-          <span class="badge">头条 · ${esc(hero.source)}</span>
+          <span class="badge">Top · ${esc(hero.source)}</span>
           <h2 class="ttl" data-open="${esc(hero.id)}">${esc(hero.title)}${zhTitle(hero)}</h2>
           ${summaryHTML(hero)}
           ${metaHTML(hero)}
+          ${trBtnHTML(hero)}
         </div>
       </article>
       <div class="mag-side">
@@ -502,6 +582,7 @@ function viewBoard(list) {
           (it) => `<article class="mini${cls(it)}" data-id="${esc(it.id)}">
           <h4 class="ttl" data-open="${esc(it.id)}">${esc(it.title)}${zhTitle(it)}</h4>
           ${metaHTML(it)}
+          ${trBtnHTML(it)}
         </article>`
         )
         .join('')}</div>
@@ -538,6 +619,7 @@ function viewTimeline(list) {
           </div>
           ${thumbHTML(it, i)}
           ${starHTML(it)}
+          ${trBtnHTML(it)}
         </article>`
         )
         .join('')}</div>
@@ -555,6 +637,7 @@ function viewReader(list) {
       (it) => `<div class="idx${state.selected === it.id ? ' on' : ''}${cls(it)}" data-pick="${esc(it.id)}" data-id="${esc(it.id)}">
       <h3 class="ttl">${esc(it.title)}${zhTitle(it)}</h3>
       ${metaHTML(it)}
+      ${trBtnHTML(it)}
     </div>`
     )
     .join('');
@@ -567,37 +650,38 @@ function viewReader(list) {
 
 function readerPaneHTML() {
   const it = state.data.items.find((x) => x.id === state.selected);
-  if (!it) return '<div class="reader-empty">从左侧选择一条开始阅读</div>';
+  if (!it) return '<div class="reader-empty">Select an item from the left to start reading</div>';
   return `<div class="reader-inner">
     <div class="kicker">
       <span class="src-dot"></span>
       <strong style="color:var(--accent)">${esc(it.source)}</strong>
       <span class="sep">·</span><span>${timeAgo(it.timestamp)}</span>
       ${it.author ? `<span class="sep">·</span><span>${esc(it.author)}</span>` : ''}
-      ${it.readMinutes ? `<span class="sep">·</span><span>${it.readMinutes} 分钟读完</span>` : ''}
+      ${it.readMinutes ? `<span class="sep">·</span><span>${it.readMinutes} min read</span>` : ''}
       <button class="icon-btn" data-mobile-close style="margin-left:auto">✕</button>
     </div>
     <h1>${esc(it.title)}${zhTitle(it)}</h1>
     ${state.prefs.images ? `<img class="reader-hero" src="${esc(imgSrc(it, 0))}" alt="" onerror="this.style.display='none'" />` : ''}
-    ${it.digest ? `<div class="body-digest"><span class="tag-zh">汇总</span>${esc(it.digest)}</div>` : ''}
-    <div class="body">${esc(it.description || it.summary || '该源未提供摘要，点击下方按钮阅读原文。')}</div>
+    ${it.digest ? `<div class="body-digest"><span class="tag-zh">Summary</span>${esc(it.digest)}</div>` : ''}
+    <div class="body">${esc(it.description || it.summary || 'This source has no summary. Click below to read the original.')}</div>
     ${it.summaryZh && it.summaryZh !== it.digest ? `<div class="body-zh">${esc(it.summaryZh)}</div>` : ''}
     ${(it.tags || []).length ? `<div class="modal-tags">${it.tags.map((t) => `<span class="badge">#${esc(t)}</span>`).join('')}</div>` : ''}
     <div class="reader-actions">
-      <a class="btn primary" href="${esc(it.link)}" target="_blank" rel="noopener" data-read="${esc(it.id)}">阅读原文 ↗</a>
-      <button class="btn" data-star="${esc(it.id)}">${state.star.has(it.id) ? '★ 已收藏' : '☆ 收藏'}</button>
-      <button class="btn" data-copy="${esc(it.link)}">复制链接</button>
+      <a class="btn primary" href="${esc(it.link)}" target="_blank" rel="noopener" data-read="${esc(it.id)}">Read original ↗</a>
+      <button class="btn" data-star="${esc(it.id)}">${state.star.has(it.id) ? '★ Starred' : '☆ Star'}</button>
+      <button class="btn" data-tr="${esc(it.id)}">译 / Translate</button>
+      <button class="btn" data-copy="${esc(it.link)}">Copy link</button>
     </div>
   </div>`;
 }
 
 function viewEmpty() {
-  return `<div class="empty"><div class="big">◎</div><p>没有匹配的内容</p><p style="font-size:12.5px">试试换个分类、清空搜索，或在设置里多勾几个源。</p></div>`;
+  return `<div class="empty"><div class="big">◎</div><p>No matching content</p><p style="font-size:12.5px">Try a different category, clear the search, or enable more sources in settings.</p></div>`;
 }
 
 function viewSkeleton() {
   return `<div class="skeleton">
-    <div class="sk-msg"><span class="spinner"></span> 正在聚合各站 RSS，首次约需几秒…</div>
+    <div class="sk-msg"><span class="spinner"></span> Aggregating RSS feeds, first load takes a few seconds…</div>
     ${Array.from({ length: 9 }, () => '<div class="sk"></div>').join('')}
   </div>`;
 }
@@ -651,17 +735,18 @@ function openItem(id) {
         <span class="src">${esc(it.source)}</span><span class="sep">·</span>
         <span>${timeAgo(it.timestamp)}</span>
         ${it.author ? `<span class="sep">·</span><span>${esc(it.author)}</span>` : ''}
-        ${it.readMinutes ? `<span class="sep">·</span><span>${it.readMinutes} 分钟读完</span>` : ''}
+        ${it.readMinutes ? `<span class="sep">·</span><span>${it.readMinutes} min read</span>` : ''}
       </div>
       <h2>${esc(it.title)}${zhTitle(it)}</h2>
-      <div class="body">${esc(it.description || it.summary || '该源未提供摘要，点击下方按钮阅读原文。')}</div>
-    ${it.summaryZh ? `<div class="body-zh">${esc(it.summaryZh)}</div>` : ''}
+      <div class="body">${esc(it.description || it.summary || 'This source has no summary. Click below to read the original.')}</div>
+    ${trActive(it) && it.summaryZh ? `<div class="body-zh">${esc(it.summaryZh)}</div>` : ''}
       ${(it.tags || []).length ? `<div class="modal-tags">${it.tags.map((t) => `<span class="badge">#${esc(t)}</span>`).join('')}</div>` : ''}
       <div class="modal-actions">
-        <a class="btn primary" href="${esc(it.link)}" target="_blank" rel="noopener">阅读原文 ↗</a>
-        <button class="btn" data-star="${esc(it.id)}">${state.star.has(it.id) ? '★ 已收藏' : '☆ 收藏'}</button>
-        <button class="btn" data-copy="${esc(it.link)}">复制链接</button>
-        <button class="btn" data-close-modal>关闭</button>
+        <a class="btn primary" href="${esc(it.link)}" target="_blank" rel="noopener">Read original ↗</a>
+        <button class="btn" data-star="${esc(it.id)}">${state.star.has(it.id) ? '★ Starred' : '☆ Star'}</button>
+        <button class="btn" data-tr="${esc(it.id)}">译 / Translate</button>
+        <button class="btn" data-copy="${esc(it.link)}">Copy link</button>
+        <button class="btn" data-close-modal>Close</button>
       </div>
     </div>`;
   el.modal.hidden = false;
@@ -682,15 +767,15 @@ function selectReader(id) {
 function toggleStar(id) {
   if (state.star.has(id)) {
     state.star.delete(id);
-    toast('已取消收藏');
+    toast('Removed from starred');
   } else {
     state.star.add(id);
-    toast('已收藏');
+    toast('Starred');
   }
   saveSets();
   document.querySelectorAll(`[data-star="${CSS.escape(id)}"]`).forEach((n) => {
     if (n.classList.contains('star-btn')) n.classList.toggle('on', state.star.has(id));
-    else n.textContent = state.star.has(id) ? '★ 已收藏' : '☆ 收藏';
+    else n.textContent = state.star.has(id) ? '★ Starred' : '☆ Star';
   });
   if (state.prefs.onlyStar) render();
 }
@@ -718,7 +803,7 @@ async function loadConfig() {
     const res = await fetch(`${API_BASE}/api/config`);
     state.config = await res.json();
   } catch {
-    state.config = { categories: [{ id: 'all', name: '全部' }], feeds: [] };
+    state.config = { categories: [{ id: 'all', name: 'All' }], feeds: [] };
   }
 }
 
@@ -734,7 +819,7 @@ async function loadNews({ fresh = false } = {}) {
   if (Array.isArray(state.prefs.sources) && state.prefs.sources.length === 0) {
     state.loading = false;
     document.getElementById('refreshBtn')?.classList.remove('spin');
-    state.data = { ...state.data, items: [], count: 0, note: '当前没有勾选任何新闻源，去右上角设置里选几个。' };
+    state.data = { ...state.data, items: [], count: 0, note: 'No news sources selected. Pick a few in the top-right settings.' };
     renderNotice();
     render();
     return;
@@ -754,8 +839,8 @@ async function loadNews({ fresh = false } = {}) {
     if (!state.data.items.length) {
       el.stage.innerHTML = `<div class="fatal">
         <div class="big">⚠</div>
-        <p class="fmsg">加载失败：${esc(err.message || err)}</p>
-        <button class="btn primary" id="retryBtn">重试</button>
+        <p class="fmsg">Load failed: ${esc(err.message || err)}</p>
+        <button class="btn primary" id="retryBtn">Retry</button>
       </div>`;
       document.getElementById('retryBtn')?.addEventListener('click', () => loadNews());
     } else {
@@ -772,12 +857,15 @@ async function loadNews({ fresh = false } = {}) {
   renderSources();
   render();
 
+  // 双语开关开启时，加载/刷新后自动翻译当前可见条目
+  if (state.prefs.translate) translateVisible();
+
   /* 刷新完成后给一个视觉反馈，让用户确认「确实刷新了」 */
   if (fresh) {
     el.stage.classList.add('stage-flash');
     setTimeout(() => el.stage.classList.remove('stage-flash'), 600);
     const up = state.data.updated ? new Date(state.data.updated) : null;
-    toast(`已刷新 · ${state.data.items.length} 条${up ? ` · ${clockOf(up.getTime())}` : ''}`);
+    toast(`Refreshed · ${state.data.items.length} items${up ? ` · ${clockOf(up.getTime())}` : ''}`);
   }
 }
 
@@ -788,6 +876,9 @@ function bind() {
   el.stage.addEventListener('click', (e) => {
     const star = e.target.closest('[data-star]');
     if (star) { e.preventDefault(); e.stopPropagation(); toggleStar(star.dataset.star); return; }
+
+    const tr = e.target.closest('[data-tr]');
+    if (tr) { e.preventDefault(); e.stopPropagation(); translateAndShow(tr.dataset.tr); return; }
 
     const copy = e.target.closest('[data-copy]');
     if (copy) { navigator.clipboard?.writeText(copy.dataset.copy); toast('链接已复制'); return; }
@@ -855,11 +946,23 @@ function bind() {
     state.prefs.theme = order[(order.indexOf(cur) + 1) % order.length];
     savePrefs();
     applyTheme();
-    toast(state.prefs.theme === 'dark' ? '深色模式' : '浅色模式');
+    toast(state.prefs.theme === 'dark' ? 'Dark mode' : 'Light mode');
   });
   $('#settingsBtn').addEventListener('click', () => {
     el.panel.hidden = false;
     el.scrim.hidden = false;
+  });
+  $('#trBtn').addEventListener('click', () => {
+    state.prefs.translate = !state.prefs.translate;
+    savePrefs();
+    $('#trBtn').classList.toggle('on', state.prefs.translate);
+    if (state.prefs.translate) {
+      toast('Translating visible items…');
+      translateVisible();
+    } else {
+      render();
+      toast('Bilingual off');
+    }
   });
   $('#panelClose').addEventListener('click', closeOverlays);
   el.scrim.addEventListener('click', closeOverlays);
@@ -870,8 +973,10 @@ function bind() {
     if (e.target === el.modal || e.target.closest('[data-close-modal]')) { el.modal.hidden = true; return; }
     const star = e.target.closest('[data-star]');
     if (star) { toggleStar(star.dataset.star); return; }
+    const tr = e.target.closest('[data-tr]');
+    if (tr) { translateAndShow(tr.dataset.tr); return; }
     const copy = e.target.closest('[data-copy]');
-    if (copy) { navigator.clipboard?.writeText(copy.dataset.copy); toast('链接已复制'); }
+    if (copy) { navigator.clipboard?.writeText(copy.dataset.copy); toast('Link copied'); }
   });
 
   // 偏好开关
@@ -918,7 +1023,7 @@ function bind() {
     state.prefs.sources = [];
     savePrefs();
     renderSources();
-    toast('已取消全部源，至少勾选一个才有内容');
+    toast('All sources unchecked — select at least one to see content');
   });
   $('#srcReset').addEventListener('click', () => {
     state.prefs.sources = null;
@@ -939,6 +1044,7 @@ function bind() {
     if (k === 'r') { loadNews({ fresh: true }); return; }
     if (k === 't') { $('#themeBtn').click(); return; }
     if (k === 's') { e.preventDefault(); $('#settingsBtn').click(); return; }
+    if (k === 'g') { e.preventDefault(); $('#trBtn').click(); return; }
     if (k === 'j' || k === 'k') { e.preventDefault(); moveCursor(k === 'j' ? 1 : -1); return; }
     if (e.key === 'Enter') {
       const node = document.querySelector('.cursor');
@@ -974,6 +1080,7 @@ async function boot() {
   try {
     applyTheme();
     renderLayoutSwitchers();
+    $('#trBtn')?.classList.toggle('on', state.prefs.translate);
     el.sort.value = state.prefs.sort;
     bind();
     render();
