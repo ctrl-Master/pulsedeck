@@ -59,6 +59,15 @@ const DEFAULT_PREFS = {
   block: '',
   translate: false, // 客户端中英双语翻译总开关
   sources: null, // null = 用服务端默认
+  mode: 'tech', // 'tech' = 科技/AI 新闻；'community' = 社区热点（知乎/虎扑/贴吧/Reddit）
+};
+
+/* 社区模式下分类的中文显示名（其他语言/未知分类回退到原 id） */
+const COMMUNITY_CAT_NAMES = {
+  zhihu: '知乎',
+  hupu: '虎扑',
+  tieba: '贴吧',
+  reddit: 'Reddit',
 };
 
 /* 安全存储：预览环境的沙箱 iframe 可能禁用 localStorage，必须 try/catch，否则顶层抛错会让整页脚本中断 */
@@ -116,6 +125,7 @@ const $ = (sel) => document.querySelector(sel);
 const el = {
   stage: $('#stage'),
   cats: $('#cats'),
+  modes: $('#modes'),
   layouts: $('#layouts'),
   mobileBar: $('#mobileBar'),
   search: $('#search'),
@@ -378,6 +388,33 @@ function renderFoot(list) {
 }
 
 function renderSources() {
+  // 社区模式：源是固定集合，只读展示各源在线状态（不可勾选）
+  if (state.prefs.mode === 'community') {
+    const srcs = state.data.sources || [];
+    document.getElementById('srcAll') && (document.getElementById('srcAll').style.display = 'none');
+    document.getElementById('srcNone') && (document.getElementById('srcNone').style.display = 'none');
+    document.getElementById('srcReset') && (document.getElementById('srcReset').style.display = 'none');
+    el.srcList.innerHTML =
+      `<div style="font-size:11px;color:var(--faint);padding:4px 9px">Community sources</div>` +
+      srcs
+        .map((s) => {
+          const bad = s.ok ? '' : ' bad';
+          const info = s.ok ? (s.count ? `${s.count} items` : 'empty') : (s.error || 'failed');
+          return `<label class="src-item">
+            <input type="checkbox" disabled ${s.ok ? 'checked' : ''} />
+            <span class="src-name">${esc(s.name)}</span>
+            <span class="src-stat${bad}">${esc(info)}</span>
+          </label>`;
+        })
+        .join('');
+    return;
+  }
+
+  // 科技模式：可勾选的源开关
+  document.getElementById('srcAll') && (document.getElementById('srcAll').style.display = '');
+  document.getElementById('srcNone') && (document.getElementById('srcNone').style.display = '');
+  document.getElementById('srcReset') && (document.getElementById('srcReset').style.display = '');
+
   const stat = new Map((state.data.sources || []).map((s) => [s.id, s]));
   const enabled = new Set(state.prefs.sources ?? state.config.feeds.filter((f) => f.enabled).map((f) => f.id));
   const catName = new Map(state.config.categories.map((c) => [c.id, c.short || c.name]));
@@ -869,6 +906,81 @@ async function loadNews({ fresh = false } = {}) {
   }
 }
 
+/* 社区热点加载（知乎 / 虎扑 / 贴吧 / Reddit）。服务端已把条目归一化成与
+   /api/news 相同的形状，前端可直接复用渲染、搜索、排序与翻译。 */
+async function loadFeeds({ fresh = false } = {}) {
+  state.loading = true;
+  document.getElementById('refreshBtn')?.classList.add('spin');
+  if (fresh || !state.data.items.length) {
+    el.stage.innerHTML = viewSkeleton();
+  }
+
+  const params = new URLSearchParams();
+  if (fresh) params.set('fresh', '1');
+
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 30000);
+  try {
+    const res = await fetch(`${API_BASE}/api/feeds?${params}`, { signal: ctrl.signal });
+    const data = await res.json();
+    state.data = { note: '', ...data };
+
+    // 社区分类（驱动顶部分类条）
+    const cats = [{ id: 'all', name: 'All' }];
+    const seen = new Set();
+    for (const it of state.data.items) {
+      if (!seen.has(it.category)) {
+        seen.add(it.category);
+        cats.push({ id: it.category, name: COMMUNITY_CAT_NAMES[it.category] || it.category });
+      }
+    }
+    state.config.categories = cats;
+
+    // 全部源失败时给提示
+    const srcs = data.sources || [];
+    const okCount = srcs.filter((s) => s.ok).length;
+    if (state.data.items.length === 0 && srcs.length) {
+      state.data.note =
+        okCount === 0
+          ? 'All community sources failed to load. RSSHub is likely blocked from the edge — try again later.'
+          : 'No community items returned this time.';
+    }
+  } catch (err) {
+    if (!state.data.items.length) {
+      el.stage.innerHTML = `<div class="fatal">
+        <div class="big">⚠</div>
+        <p class="fmsg">Load failed: ${esc(err.message || err)}</p>
+        <button class="btn primary" id="retryBtn">Retry</button>
+      </div>`;
+      document.getElementById('retryBtn')?.addEventListener('click', () => loadFeeds());
+    } else {
+      state.data = { ...state.data, note: `加载失败：${err.message}` };
+    }
+  } finally {
+    clearTimeout(to);
+    state.loading = false;
+    document.getElementById('refreshBtn')?.classList.remove('spin');
+  }
+
+  renderNotice();
+  renderSources();
+  render();
+
+  if (state.prefs.translate) translateVisible();
+
+  if (fresh) {
+    el.stage.classList.add('stage-flash');
+    setTimeout(() => el.stage.classList.remove('stage-flash'), 600);
+    const up = state.data.updated ? new Date(state.data.updated) : null;
+    toast(`Refreshed · ${state.data.items.length} items${up ? ` · ${clockOf(up.getTime())}` : ''}`);
+  }
+}
+
+/* 根据当前模式选择加载器（科技新闻 / 社区热点） */
+function loadActive({ fresh = false } = {}) {
+  return state.prefs.mode === 'community' ? loadFeeds({ fresh }) : loadNews({ fresh });
+}
+
 /* ------------------------- 事件绑定 ------------------------- */
 
 function bind() {
@@ -908,6 +1020,23 @@ function bind() {
     render();
   });
 
+  // 模式切换（Tech & AI / Community）
+  el.modes.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-mode]');
+    if (!btn) return;
+    const m = btn.dataset.mode;
+    if (m === state.prefs.mode) return;
+    state.prefs.mode = m;
+    savePrefs();
+    document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
+    el.brandSub.textContent =
+      m === 'community'
+        ? 'Community'
+        : LAYOUTS.find((l) => l.id === state.prefs.layout)?.name || 'News';
+    if (m === 'community') loadFeeds(); // 切换即加载对应数据
+    else loadNews();
+  });
+
   // 布局（桌面 + 移动）
   for (const node of [el.layouts, el.mobileBar]) {
     node.addEventListener('click', (e) => {
@@ -939,7 +1068,7 @@ function bind() {
   });
 
   // 顶栏按钮
-  $('#refreshBtn').addEventListener('click', () => loadNews({ fresh: true }));
+  $('#refreshBtn').addEventListener('click', () => loadActive({ fresh: true }));
   $('#themeBtn').addEventListener('click', () => {
     const order = ['light', 'dark'];
     const cur = document.documentElement.dataset.theme;
@@ -1056,8 +1185,8 @@ function bind() {
     if (state.prefs.theme === 'auto') applyTheme();
   });
 
-  // 每 10 分钟自动刷新一次
-  setInterval(() => { if (!document.hidden) loadNews(); }, 10 * 60 * 1000);
+  // 每 10 分钟自动刷新一次（按当前模式）
+  setInterval(() => { if (!document.hidden) loadActive(); }, 10 * 60 * 1000);
 }
 
 function moveCursor(delta) {
@@ -1082,11 +1211,13 @@ async function boot() {
     renderLayoutSwitchers();
     $('#trBtn')?.classList.toggle('on', state.prefs.translate);
     el.sort.value = state.prefs.sort;
+    document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('on', b.dataset.mode === state.prefs.mode));
+    if (state.prefs.mode === 'community') el.brandSub.textContent = 'Community';
     bind();
     render();
     await loadConfig();
     renderSources();
-    await loadNews();
+    await (state.prefs.mode === 'community' ? loadFeeds() : loadNews());
   } catch (err) {
     surfaceError('启动失败：' + (err && err.message ? err.message : err));
   }

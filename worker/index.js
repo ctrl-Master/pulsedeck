@@ -9,6 +9,7 @@
 
 import { FEEDS, CATEGORIES, resolveFeeds, publicFeeds } from '../shared/feeds.js';
 import { aggregate } from '../shared/aggregate.js';
+import { aggregateCommunity } from '../shared/community.js';
 import { makeTranslator } from '../shared/translate.js';
 import { makeSummarizer } from '../shared/summarize.js';
 
@@ -203,6 +204,23 @@ async function handleImage(url) {
   }
 }
 
+/* ------------------------------ 社区热点 ------------------------------ */
+
+/** 社区源聚合（知乎 / 虎扑 / 贴吧 / Reddit），含 Top 条目全文提取。
+ *  归一化后的条目形状与 /api/news 一致，前端可复用同一套渲染。 */
+async function handleCommunity(url, env, ctx) {
+  const fresh = url.searchParams.get('fresh') === '1';
+  const data = await aggregateCommunity({ fresh });
+
+  const bodyText = JSON.stringify(data);
+  const headers = {
+    ...JSON_HEADERS,
+    'Cache-Control': `public, max-age=${CACHE_SECONDS}`,
+  };
+  // 直接从字符串构造 Response：本模块内部已写缓存，这里不再 clone()，避免空体竞态。
+  return new Response(bodyText, { headers });
+}
+
 /* ------------------------------ 入口 ------------------------------ */
 
 export default {
@@ -226,6 +244,9 @@ export default {
 
       case '/api/news':
         return handleNews(url, env, ctx);
+
+      case '/api/feeds':
+        return handleCommunity(url, env, ctx);
 
       case '/api/rss':
         return handleRss(url, env, ctx);

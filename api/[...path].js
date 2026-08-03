@@ -62,13 +62,14 @@ export default async function handler(request, context) {
   // context 携带 waitUntil（Vercel Edge 支持），原 worker 通过可选链安全调用。
   const url = new URL(request.url);
   const isNews = url.pathname === '/api/news';
+  const isFeeds = url.pathname === '/api/feeds';
 
   let res = await worker.fetch(request, env, context);
 
   // 空响应自愈：上游偶发把「空 200」写进边缘缓存后，非 fresh 请求会读到空体，
   // 且 Vercel CDN 会据此缓存空体长达 max-age。这里检测到空体即强制 fresh 重算，
   // 并把好数据写回 caches.default 与本次返回，使 CDN 也改写为好响应。
-  if (isNews && res.status === 200) {
+  if ((isNews || isFeeds) && res.status === 200) {
     const body = await res.text();
     let data = null;
     try { data = JSON.parse(body); } catch {}
@@ -78,25 +79,30 @@ export default async function handler(request, context) {
       (data && !('items' in data));
 
     if (isEmpty) {
-      const fu = new URL(request.url);
-      fu.searchParams.set('fresh', '1');
-      const freshReq = new Request(fu.toString(), request);
-      const freshRes = await worker.fetch(freshReq, env, context);
-      const freshBody = await freshRes.text();
-      if (freshBody) {
-        try {
-          const s = url.searchParams.get('sources') || 'default';
-          const l = Math.min(Number(url.searchParams.get('limit')) || 200, 400);
-          const ck = new Request(`https://pulsedeck.cache/news?s=${encodeURIComponent(s)}&l=${l}`);
-          await caches.default.put(ck, new Response(freshBody, { headers: freshRes.headers }));
-        } catch {}
-        return new Response(freshBody, { status: 200, headers: freshRes.headers });
+      if (isNews) {
+        // 新闻：空体多为上游偶发写入空缓存，强制 fresh 重算并刷新缓存。
+        const fu = new URL(request.url);
+        fu.searchParams.set('fresh', '1');
+        const freshReq = new Request(fu.toString(), request);
+        const freshRes = await worker.fetch(freshReq, env, context);
+        const freshBody = await freshRes.text();
+        if (freshBody) {
+          try {
+            const s = url.searchParams.get('sources') || 'default';
+            const l = Math.min(Number(url.searchParams.get('limit')) || 200, 400);
+            const ck = new Request(`https://pulsedeck.cache/news?s=${encodeURIComponent(s)}&l=${l}`);
+            await caches.default.put(ck, new Response(freshBody, { headers: freshRes.headers }));
+          } catch {}
+          return new Response(freshBody, { status: 200, headers: freshRes.headers });
+        }
+        // fresh 也拿不到数据：返回 502 且不缓存，避免把空体固化进 CDN。
+        return new Response(
+          JSON.stringify({ error: 'empty aggregate', items: [], sources: [] }),
+          { status: 502, headers: { ...JSON_HEADERS, 'Cache-Control': 'no-store' } }
+        );
       }
-      // fresh 也拿不到数据：返回 502 且不缓存，避免把空体固化进 CDN。
-      return new Response(
-        JSON.stringify({ error: 'empty aggregate', items: [], sources: [] }),
-        { status: 502, headers: { ...JSON_HEADERS, 'Cache-Control': 'no-store' } }
-      );
+      // 社区：全部源失败是真实状态（RSSHub 可能被边缘 IP 拦截），原样返回（模块已缓存）。
+      return new Response(body, { status: 200, headers: res.headers });
     }
     // 非空：重新缓冲后返回，规避 clone() 在 edge 缓存写入时的竞态（防缓存空体）。
     return new Response(body, { status: 200, headers: res.headers });

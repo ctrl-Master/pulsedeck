@@ -245,6 +245,34 @@ button { cursor: pointer; border: none; background: none; }
   border-radius: 11px;
   flex-shrink: 0;
 }
+
+/* 模式切换（Tech & AI / Community） */
+.modes {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--surface-3);
+  border-radius: 11px;
+  flex-shrink: 0;
+}
+.mode {
+  padding: 5px 13px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+  transition: all .15s;
+  white-space: nowrap;
+}
+.mode:hover { color: var(--text); }
+.mode.on {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+@media (max-width: 720px) {
+  .modes { order: -1; }
+}
 .lay-btn {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 10px;
