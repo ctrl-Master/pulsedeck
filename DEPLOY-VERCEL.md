@@ -32,7 +32,7 @@ vercel --prod     # 生产环境
 
 保持**完全一致的功能与界面**，仅后端运行环境不同：
 
-- **翻译 / 摘要**：原代码检测到无 `env.AI` 会自动降级到 **MyMemory 免费接口 + 本地清洗摘要**（与本地 `npm run dev` 行为一致），无需任何密钥。如需更好的中文摘要，可后续接第三方翻译/LLM Key。
+- **翻译 / 摘要（Vercel 上已禁用）**：原代码在无 `env.AI` 时会降级到 MyMemory 免费接口，但默认全源约 200 条英文 × 2 次调用 ≈ **480 次 MyMemory 网络请求**，免费额度很快 429，叠加起来会超出 Vercel 免费版 Edge Function 的 **25 秒硬上限**（实测 `/api/news` 返回 `FUNCTION_INVOCATION_TIMEOUT`，页面因此「能打开却没数据」）。适配层因此注入一个即时空操作的假 `env.AI`，让翻译/摘要在 Vercel 上走 Workers AI 分支（不发 MyMemory 请求、调用直接返回），彻底消除那 480 次慢请求。代价：**英文条目在 Vercel 上显示原文（不做中文翻译）**，其余功能/格式/内容不变。若要坚持中文翻译，请改用 Cloudflare Workers（天然带 Workers AI），或在 Vercel 上接入真实翻译后端并自行放宽超时。
 - **缓存**：`/api/news` 的 5 分钟边缘缓存退化为函数实例内的内存缓存（Vercel Edge 未提供 `caches.default` 时自动垫片），功能不受影响。
 - **图片代理 `/api/img`**：照常工作（Vercel 函数有出网能力）。
 - **静态资源**：由 Vercel 直接托管 `public/`，同源无跨域问题，`API_BASE` 保持为空即可。

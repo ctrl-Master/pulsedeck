@@ -34,8 +34,24 @@ if (typeof caches === 'undefined' || !caches.default) {
 export const config = { runtime: 'edge' };
 
 export default async function handler(request, context) {
-  // env 留空：触发原代码的 MyMemory / 本地降级分支，无需 Workers AI 绑定。
-  const env = {};
+  // Vercel 免费版 Edge Function 仅有 25s 硬上限。原代码在无 env.AI 时会降级到 MyMemory
+  // 翻译，默认全源约 200 条英文 × 每条 2 次调用 ≈ 480 次 MyMemory 网络请求（还带重试），
+  // 免费额度很快 429，叠加起来必然超时（实测 /api/news 返回 FUNCTION_INVOCATION_TIMEOUT）。
+  //
+  // Vercel 上并无 Workers AI 绑定，这里注入一个「即时空操作」的假 env.AI：
+  //   - 让 makeTranslator / makeSummarizer 走 Workers AI 分支（该分支不发起 MyMemory 请求）；
+  //   - 每次调用直接返回空，把那 ~480 次慢网络请求彻底消除。
+  // 于是 /api/news 只剩 ~17 个 RSS 并行抓取（≤8s）+ 解析排序，稳稳在 25s 内完成。
+  //
+  // 代价：英文条目在 Vercel 上显示原文（不做中文翻译）——这本就是免费版 MyMemory 撑不住的功能。
+  // 其余功能 / 格式 / 内容与原 Cloudflare 部署完全一致。
+  const env = {
+    AI: {
+      async run() {
+        return {};
+      },
+    },
+  };
   // context 携带 waitUntil（Vercel Edge 支持），原 worker 通过可选链安全调用。
   return worker.fetch(request, env, context);
 }
