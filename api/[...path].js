@@ -138,6 +138,10 @@ export default async function handler(req) {
   }
 }
 
-export const config = {
-  runtime: 'nodejs',
-};
+// Vercel 现行标准写法：顶层 `runtime` / `maxDuration` 导出，
+// 路由到新一代 Fluid Node 运行时（对 ESM 的 api/ 函数支持良好）。
+// 注意：旧的 `export const config = { runtime: 'nodejs' }` 写法会把函数
+// 路由到老的 @vercel/node 构建器，对 "type":"module" + 相对 ESM 导入的
+// api/ 函数处理有兼容问题，导致模块加载即崩溃（FUNCTION_INVOCATION_FAILED）。
+export const runtime = 'nodejs';
+export const maxDuration = 60;

@@ -884,6 +884,7 @@ async function loadNews({ fresh = false } = {}) {
   const to = setTimeout(() => ctrl.abort(), 30000);
   try {
     const res = await fetch(`${API_BASE}/api/news?${params}`, { signal: ctrl.signal });
+    if (!res.ok) throw new Error('接口返回 ' + res.status);
     const data = await res.json();
     state.data = { note: '', ...data };
   } catch (err) {
@@ -988,6 +989,7 @@ async function loadFeeds({ fresh = false } = {}) {
   const to = setTimeout(() => ctrl.abort(), 30000);
   try {
     const res = await fetch(`${API_BASE}/api/feeds?${params}`, { signal: ctrl.signal });
+    if (!res.ok) throw new Error('接口返回 ' + res.status);
     const data = await res.json();
     state.data = { note: '', ...data };
 
@@ -1014,8 +1016,9 @@ async function loadFeeds({ fresh = false } = {}) {
   } catch (err) {
     if (!state.data.items.length) {
       // 网络层失败（而非源级失败）：用一份社区示例数据兜底，保证界面永远有内容。
-      state.data = buildCommunitySample();
-      state.config.categories = state.data.categories;
+    state.data = buildCommunitySample();
+    state.config.categories = state.data.categories;
+    }
     if (!state.data.items.length) {
       el.stage.innerHTML = `<div class="fatal">
         <div class="big">⚠</div>
