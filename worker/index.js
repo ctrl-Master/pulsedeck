@@ -125,14 +125,18 @@ async function handleNews(url, env, ctx) {
 
   data.categories = CATEGORIES;
 
-  const response = new Response(JSON.stringify(data), {
-    headers: {
-      ...JSON_HEADERS,
-      'Cache-Control': `public, max-age=${CACHE_SECONDS}`,
-    },
-  });
+  // 缓冲成字符串后再构造 Response：规避 edge 运行时 new Response(string).clone()
+  // 在「返回客户端」与「写入缓存」并发读取同一流时偶发写入空体的竞态（导致 Vercel
+  // 把空 200 缓存最多 5 分钟）。用同一份字符串构造两份 Response 可彻底消除该竞态。
+  const bodyText = JSON.stringify(data);
+  const newsHeaders = {
+    ...JSON_HEADERS,
+    'Cache-Control': `public, max-age=${CACHE_SECONDS}`,
+  };
+  const response = new Response(bodyText, { headers: newsHeaders });
 
-  ctx?.waitUntil?.(cache.put(cacheKey, response.clone()));
+  // 用同一缓冲字符串另构造一份用于缓存，避免 clone() 共享流导致的空体。
+  ctx?.waitUntil?.(cache.put(cacheKey, new Response(bodyText, { headers: newsHeaders })));
   return response;
 }
 
