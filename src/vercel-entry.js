@@ -114,12 +114,24 @@ const server = {
   },
 };
 
-export default async function handler(req) {
-  const url = new URL(req.url);
-  const { pathname, searchParams } = url;
-  const route = pathname.replace(/^\/api\//, '').split('/')[0];
-
+// 注意：Vercel Node 运行时传给 ESM 默认导出的 req 既可能是标准 Web Request
+// （req.url 为绝对地址），也可能在某些版本/桥接下表现为相对路径。
+// 这里对 URL 解析做容错，并把解析放进 try，确保任何错误都返回 JSON 而非裸崩。
+function safeUrl(req) {
+  const raw = (req && (req.url || (req.request && req.request.url))) || '/';
   try {
+    return raw.startsWith('http') ? new URL(raw) : new URL(raw, 'http://localhost');
+  } catch {
+    return new URL('/', 'http://localhost');
+  }
+}
+
+export default async function handler(req) {
+  try {
+    const url = safeUrl(req);
+    const { pathname, searchParams } = url;
+    const route = pathname.replace(/^\/api\//, '').split('/')[0];
+
     switch (route) {
       case 'news':
         return await server.handleNews(searchParams);
@@ -138,7 +150,10 @@ export default async function handler(req) {
         return json({ ok: false, error: `unknown route: ${pathname}` }, 404);
     }
   } catch (e) {
-    return json({ ok: false, error: String((e && e.message) || e) }, 500);
+    return json(
+      { ok: false, error: String((e && e.message) || e), stack: String((e && e.stack) || '').slice(0, 600) },
+      500
+    );
   }
 }
 

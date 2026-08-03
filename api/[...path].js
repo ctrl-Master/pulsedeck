@@ -1238,11 +1238,19 @@ var server = {
     return json({ ok: true, time: (/* @__PURE__ */ new Date()).toISOString(), feeds: FEEDS.length, live: true });
   }
 };
-async function handler(req) {
-  const url = new URL(req.url);
-  const { pathname, searchParams } = url;
-  const route = pathname.replace(/^\/api\//, "").split("/")[0];
+function safeUrl(req) {
+  const raw = req && (req.url || req.request && req.request.url) || "/";
   try {
+    return raw.startsWith("http") ? new URL(raw) : new URL(raw, "http://localhost");
+  } catch {
+    return new URL("/", "http://localhost");
+  }
+}
+async function handler(req) {
+  try {
+    const url = safeUrl(req);
+    const { pathname, searchParams } = url;
+    const route = pathname.replace(/^\/api\//, "").split("/")[0];
     switch (route) {
       case "news":
         return await server.handleNews(searchParams);
@@ -1261,7 +1269,10 @@ async function handler(req) {
         return json({ ok: false, error: `unknown route: ${pathname}` }, 404);
     }
   } catch (e) {
-    return json({ ok: false, error: String(e && e.message || e) }, 500);
+    return json(
+      { ok: false, error: String(e && e.message || e), stack: String(e && e.stack || "").slice(0, 600) },
+      500
+    );
   }
 }
 var runtime = "nodejs";
