@@ -592,7 +592,7 @@ function normalize(it) {
 var memCache = /* @__PURE__ */ new Map();
 var EDGE_CACHE = typeof caches !== "undefined" && caches && caches.default ? caches.default : null;
 async function aggregateCommunity({ fresh = false } = {}) {
-  const CACHE_KEY2 = "community";
+  const CACHE_KEY = "community";
   if (!fresh && EDGE_CACHE) {
     const cached = await EDGE_CACHE.match(new Request("https://pulsedeck.cache/community"));
     if (cached) {
@@ -604,8 +604,8 @@ async function aggregateCommunity({ fresh = false } = {}) {
         }
       }
     }
-  } else if (!fresh && memCache.has(CACHE_KEY2)) {
-    const e = memCache.get(CACHE_KEY2);
+  } else if (!fresh && memCache.has(CACHE_KEY)) {
+    const e = memCache.get(CACHE_KEY);
     if (Date.now() - e.t < COMMUNITY_CACHE_SECONDS * 1e3) return e.data;
   }
   const results = await Promise.allSettled(
@@ -652,226 +652,9 @@ async function aggregateCommunity({ fresh = false } = {}) {
     } catch {
     }
   } else {
-    memCache.set(CACHE_KEY2, { t: Date.now(), data: out });
+    memCache.set(CACHE_KEY, { t: Date.now(), data: out });
   }
   return out;
-}
-
-// shared/telegram.js
-var TG_CHANNELS = [
-  { username: "tnews365", name: "\u7AF9\u65B0\u793E", tag: "\u7AF9\u65B0\u793E / \u7EFC\u5408\u5FEB\u8BAF", category: "\u7EFC\u5408\u5FEB\u8BAF" },
-  { username: "xhqcankao", name: "\u98CE\u5411\u65D7", tag: "\u98CE\u5411\u65D7 / \u6DF1\u5EA6\u53C2\u8003", category: "\u6DF1\u5EA6\u53C2\u8003" },
-  { username: "ithome_chat", name: "IT\u4E4B\u5BB6\u5FEB\u8BAF", tag: "IT\u4E4B\u5BB6 / \u6570\u7801\u79D1\u6280", category: "\u6570\u7801\u79D1\u6280" },
-  { username: "sspai", name: "\u5C11\u6570\u6D3E", tag: "\u5C11\u6570\u6D3E / \u6548\u7387\u5DE5\u5177", category: "\u6548\u7387\u5DE5\u5177" },
-  { username: "AIBase", name: "AI \u79D1\u6280\u524D\u6CBF", tag: "AI\u524D\u6CBF / \u5927\u6A21\u578B", category: "\u5927\u6A21\u578B" },
-  { username: "GithubTrending", name: "GitHub \u8D8B\u52BF", tag: "\u5F00\u6E90 / \u5F00\u53D1\u8005", category: "\u5F00\u53D1\u8005" }
-];
-var CACHE = /* @__PURE__ */ new Map();
-var CACHE_KEY = "tg-aggregate";
-var CACHE_TTL = 10 * 60 * 1e3;
-function getEnv(name, fallback = "") {
-  if (typeof process !== "undefined" && process.env && process.env[name]) return process.env[name];
-  return fallback;
-}
-function pickText(itemXml, tag) {
-  const raw = tagText(itemXml, tag);
-  return cleanText(raw);
-}
-function normalizeTme(link = "") {
-  try {
-    const u = new URL(decodeEntities(link));
-    return u.toString().replace(/^https?:\/\/t\.me\/s\//i, "https://t.me/");
-  } catch {
-    return link;
-  }
-}
-function detectLang(text = "") {
-  return /[一-鿿]/.test(text) ? "zh" : "en";
-}
-function hashId(s = "") {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = h * 31 + s.charCodeAt(i) | 0;
-  return Math.abs(h).toString(36);
-}
-async function fetchChannelXml(channel, baseUrl) {
-  const url = `${baseUrl.replace(/\/$/, "")}/telegram/channel/${channel.username}`;
-  const ctrl = new AbortController();
-  const to = setTimeout(() => ctrl.abort(), 12e3);
-  try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout ? AbortSignal.timeout(12e3) : ctrl.signal,
-      headers: { "User-Agent": "Pulsedeck/2.0 (+https://insights.hizhihao.me)" }
-    });
-    if (!res.ok) throw new Error("RSSHub " + res.status);
-    const xml = await res.text();
-    return xml;
-  } finally {
-    clearTimeout(to);
-  }
-}
-function parseItems(xml, channel, limit = 8) {
-  const items = [];
-  const blocks = xml.match(/<item[\s>][\s\S]*?<\/item>/gi) || [];
-  for (const block of blocks) {
-    const description = pickText(block, "description");
-    if (!description) continue;
-    const titleRaw = pickText(block, "title");
-    const pubDate = pickText(block, "pubDate");
-    const link = normalizeTme(linkOf(block) || "");
-    const guid = pickText(block, "guid") || link || `${channel.username}-${items.length}`;
-    const ts = pubDate ? Date.parse(pubDate) : Date.now();
-    let title = titleRaw && titleRaw !== description ? titleRaw : description.split("\n")[0].slice(0, 60);
-    items.push({
-      _channel: channel.username,
-      id: `${channel.username}-${hashId(guid)}`,
-      title: title.slice(0, 80),
-      description,
-      // 原始全文
-      link,
-      timestamp: Number.isNaN(ts) ? Date.now() : ts,
-      category: channel.username,
-      // 用于前端来源筛选（唯一键）
-      source: channel.name,
-      tag: channel.tag,
-      channelCategory: channel.category,
-      lang: detectLang(description),
-      _rawTags: []
-    });
-    if (items.length >= limit) break;
-  }
-  return items;
-}
-var SYS_PROMPT = [
-  "\u4F60\u662F\u4E00\u4E2A\u8D44\u6DF1\u79D1\u6280\u7F16\u8F91\uFF0C\u8D1F\u8D23\u5BA1\u6838\u5E76\u63D0\u70BC Telegram \u8D44\u8BAF\u9891\u9053\u7684\u5185\u5BB9\u3002",
-  "\u5408\u89C4\u539F\u5219\uFF1A\u53EA\u8FC7\u6EE4\u4E25\u91CD\u8FDD\u6CD5\u8FDD\u89C4\u3001\u6D89\u9EC4\u6D89\u66B4\u3001\u672A\u7ECF\u8BC1\u5B9E\u7684\u6D89\u653F\u8C23\u8A00\u7B49\u9AD8\u5371\u5185\u5BB9\uFF1B",
-  "\u666E\u901A\u79D1\u6280\u3001\u6570\u7801\u3001\u5F00\u6E90\u3001\u5546\u4E1A\u3001\u4E00\u822C\u6027\u793E\u4F1A\u8D8B\u52BF\u65B0\u95FB\u4E00\u5F8B\u4FDD\u7559\uFF0C\u4E0D\u8981\u4E00\u5200\u5207\u3002",
-  "\u82E5\u5185\u5BB9\u5B58\u5728\u8F7B\u5FAE\u4E89\u8BAE\u6216\u4E0D\u786E\u5B9A\u6027\uFF0C\u8BF7\u5728 tags \u4E2D\u52A0\u5165\u300C\u9700\u7504\u522B\u300D\u3002",
-  '\u5FC5\u987B\u4EE5 JSON \u683C\u5F0F\u8F93\u51FA\uFF1A{"is_safe": true, "summary": "...", "tags": ["...", "..."]}\u3002',
-  "\u82E5 is_safe \u4E3A false\uFF08\u547D\u4E2D\u9AD8\u5371\u8FDD\u89C4\u7EA2\u7EBF\uFF09\uFF0Csummary \u586B\u7A7A\u5B57\u7B26\u4E32\u3001tags \u4E3A\u7A7A\u6570\u7EC4\u3002"
-].join("\n");
-function extractJson(text = "") {
-  try {
-    const m = text.match(/\{[\s\S]*\}/);
-    if (m) return JSON.parse(m[0]);
-  } catch {
-  }
-  return null;
-}
-async function summarizeWithLLM(text, apiKey, baseUrl) {
-  const url = `${baseUrl.replace(/\/$/, "")}/chat/completions`;
-  const body = {
-    model: getEnv("DEEPSEEK_MODEL", "deepseek-chat"),
-    messages: [
-      { role: "system", content: SYS_PROMPT },
-      {
-        role: "user",
-        content: `\u8BF7\u5BA1\u6838\u5E76\u63D0\u70BC\u4E0B\u9762\u8FD9\u6761\u5FEB\u8BAF\uFF081-2 \u53E5\u4E2D\u6587\u603B\u7ED3 + 3 \u4E2A\u5173\u952E\u8BCD\uFF09\uFF1A
-
-${text.slice(0, 1500)}`
-      }
-    ],
-    temperature: 0.3,
-    max_tokens: 400,
-    response_format: { type: "json_object" }
-  };
-  const ctrl = new AbortController();
-  const to = setTimeout(() => ctrl.abort(), 8e3);
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      signal: AbortSignal.timeout ? AbortSignal.timeout(8e3) : ctrl.signal,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(body)
-    });
-    if (!res.ok) throw new Error("LLM " + res.status);
-    const j = await res.json();
-    const content = j?.choices?.[0]?.message?.content || "";
-    const parsed = extractJson(content);
-    if (!parsed) return null;
-    return {
-      is_safe: parsed.is_safe !== false,
-      summary: String(parsed.summary || "").trim(),
-      tags: Array.isArray(parsed.tags) ? parsed.tags.map(String).filter(Boolean).slice(0, 5) : []
-    };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(to);
-  }
-}
-async function mapLimit(arr, limit, fn) {
-  const out = [];
-  let i = 0;
-  async function worker() {
-    while (i < arr.length) {
-      const idx = i++;
-      try {
-        out[idx] = await fn(arr[idx], idx);
-      } catch {
-        out[idx] = null;
-      }
-    }
-  }
-  const workers = Array.from({ length: Math.min(limit, arr.length) }, worker);
-  await Promise.all(workers);
-  return out;
-}
-async function aggregateTelegram({ fresh = false } = {}) {
-  const cached = CACHE.get(CACHE_KEY);
-  if (!fresh && cached && Date.now() - cached.ts < CACHE_TTL) {
-    return cached.data;
-  }
-  const baseUrl = getEnv("RSSHUB_BASE_URL", "https://rsshub.app");
-  const apiKey = getEnv("DEEPSEEK_API_KEY", "");
-  const llmBase = getEnv("DEEPSEEK_BASE_URL", "https://api.deepseek.com");
-  const useLLM = !!apiKey;
-  const channelResults = await Promise.all(
-    TG_CHANNELS.map(async (ch) => {
-      try {
-        const xml = await fetchChannelXml(ch, baseUrl);
-        const items = parseItems(xml, ch, 8);
-        return { channel: ch, items, ok: true, error: "" };
-      } catch (e) {
-        return { channel: ch, items: [], ok: false, error: String(e && e.message || e) };
-      }
-    })
-  );
-  let merged = [];
-  const sources = [];
-  for (const r of channelResults) {
-    sources.push({ id: r.channel.username, name: r.channel.name, ok: r.ok, error: r.error });
-    if (!r.items.length) continue;
-    if (useLLM) {
-      const summarized = await mapLimit(r.items, 4, async (it) => {
-        const res = await summarizeWithLLM(it.description, apiKey, llmBase);
-        if (!res) {
-          return { ...it, summary: it.description.slice(0, 140), tags: [it.channelCategory], digest: it.description.slice(0, 140) };
-        }
-        if (!res.is_safe) return null;
-        const tags = Array.from(/* @__PURE__ */ new Set([it.channelCategory, ...res.tags])).slice(0, 6);
-        return { ...it, summary: res.summary, digest: res.summary, tags };
-      });
-      for (const it of summarized) if (it) merged.push(it);
-    } else {
-      for (const it of r.items) {
-        merged.push({ ...it, summary: it.description.slice(0, 140), digest: it.description.slice(0, 140), tags: [it.channelCategory] });
-      }
-    }
-  }
-  merged.sort((a, b) => b.timestamp - a.timestamp);
-  const data = {
-    updated: (/* @__PURE__ */ new Date()).toISOString(),
-    count: merged.length,
-    sources,
-    items: merged,
-    demo: false,
-    note: merged.length === 0 ? "\u672C\u6B21\u672A\u6293\u53D6\u5230\u4EFB\u4F55 Telegram \u5185\u5BB9\uFF0C\u53EF\u80FD\u662F RSSHub \u5B9E\u4F8B\u4E0D\u53EF\u7528\u6216\u6240\u6709\u9891\u9053\u4E34\u65F6\u4E0D\u53EF\u8FBE\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u6216\u68C0\u67E5 RSSHUB_BASE_URL\u3002" : useLLM ? "" : "\u672A\u914D\u7F6E DEEPSEEK_API_KEY\uFF0C\u5DF2\u4F7F\u7528\u539F\u6587\u6458\u8981\uFF08\u672A\u542F\u7528 AI \u5BA1\u9A8C/\u603B\u7ED3\uFF09\u3002"
-  };
-  CACHE.set(CACHE_KEY, { ts: Date.now(), data });
-  return data;
 }
 
 // shared/translate.js
@@ -1470,23 +1253,6 @@ var server = {
       return json({ ok: true, text: "" });
     }
   },
-  async handleTelegram(params, req, isNode) {
-    const fresh = params.get("fresh") === "1";
-    const cron = params.get("cron") === "1";
-    if (cron) {
-      const secret = typeof process !== "undefined" && process.env && process.env.CRON_SECRET || "";
-      if (secret) {
-        const auth = getHeader(req, isNode, "authorization") || "";
-        const qSecret = params.get("secret") || "";
-        const ok = qSecret === secret || auth === `Bearer ${secret}`;
-        if (!ok) return json({ ok: false, error: "unauthorized" }, 401);
-      }
-      const data2 = await aggregateTelegram({ fresh: true });
-      return json({ ok: true, count: data2.items.length, sources: data2.sources });
-    }
-    const data = await aggregateTelegram({ fresh });
-    return json(data);
-  },
   async handleImg(params) {
     const w = Math.min(Math.max(Number(params.get("w")) || 600, 50), 2e3);
     const h = Math.min(Math.max(Number(params.get("h")) || 400, 50), 2e3);
@@ -1515,14 +1281,6 @@ function readNodeBody(req) {
     req.on("end", () => resolve(data));
     req.on("error", () => resolve(""));
   });
-}
-function getHeader(req, isNode, name) {
-  if (isNode) return req && req.headers && req.headers[name.toLowerCase()] || "";
-  try {
-    return req && req.headers && req.headers.get(name) || "";
-  } catch {
-    return "";
-  }
 }
 async function handler(req, res) {
   const isNode = !!(res && typeof res.end === "function");
@@ -1568,9 +1326,6 @@ async function handler(req, res) {
         break;
       case "health":
         result = server.handleHealth();
-        break;
-      case "telegram":
-        result = await server.handleTelegram(searchParams, req, isNode);
         break;
       default:
         result = json({ ok: false, error: `unknown route: ${pathname}` }, 404);

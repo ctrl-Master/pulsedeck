@@ -18,7 +18,6 @@
 import { FEEDS, CATEGORIES } from '../shared/feeds.js';
 import { aggregate } from '../shared/aggregate.js';
 import { aggregateCommunity } from '../shared/community.js';
-import { aggregateTelegram, TG_CHANNELS } from '../shared/telegram.js';
 import { makeTranslator } from '../shared/translate.js';
 import { makeSummarizer } from '../shared/summarize.js';
 import { buildSampleData } from '../shared/sample-data.js';
@@ -117,27 +116,6 @@ const server = {
     }
   },
 
-  async handleTelegram(params, req, isNode) {
-    const fresh = params.get('fresh') === '1';
-    const cron = params.get('cron') === '1';
-
-    // Vercel Cron 预热：校验 CRON_SECRET（支持 query ?secret= 或 Vercel 默认 Authorization: Bearer）
-    if (cron) {
-      const secret = (typeof process !== 'undefined' && process.env && process.env.CRON_SECRET) || '';
-      if (secret) {
-        const auth = getHeader(req, isNode, 'authorization') || '';
-        const qSecret = params.get('secret') || '';
-        const ok = qSecret === secret || auth === `Bearer ${secret}`;
-        if (!ok) return json({ ok: false, error: 'unauthorized' }, 401);
-      }
-      const data = await aggregateTelegram({ fresh: true });
-      return json({ ok: true, count: data.items.length, sources: data.sources });
-    }
-
-    const data = await aggregateTelegram({ fresh });
-    return json(data);
-  },
-
   async handleImg(params) {
     const w = Math.min(Math.max(Number(params.get('w')) || 600, 50), 2000);
     const h = Math.min(Math.max(Number(params.get('h')) || 400, 50), 2000);
@@ -233,9 +211,6 @@ export default async function handler(req, res) {
         break;
       case 'health':
         result = server.handleHealth();
-        break;
-      case 'telegram':
-        result = await server.handleTelegram(searchParams, req, isNode);
         break;
       default:
         result = json({ ok: false, error: `unknown route: ${pathname}` }, 404);
