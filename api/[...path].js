@@ -326,6 +326,8 @@ async function fetchWithTimeout(url, { timeout = 8e3, ...init } = {}) {
     clearTimeout(timer);
   }
 }
+var newsCache = /* @__PURE__ */ new Map();
+var NEWS_CACHE_TTL = 6e4;
 async function aggregate(feeds, opts = {}) {
   const {
     limit = 200,
@@ -337,6 +339,9 @@ async function aggregate(feeds, opts = {}) {
     summarizer = null,
     summarizeTo = "zh"
   } = opts;
+  const NEWS_CACHE_KEY = `news:${feeds.length}:${limit}`;
+  const cached = newsCache.get(NEWS_CACHE_KEY);
+  if (cached && Date.now() - cached.t < NEWS_CACHE_TTL) return cached.data;
   const settled = await Promise.allSettled(
     feeds.map(async (feed) => {
       const res = await fetchWithTimeout(feed.url, {
@@ -406,7 +411,7 @@ async function aggregate(feeds, opts = {}) {
       it.digest = it.lang === "zh" ? it.summary || it.title : it.summaryZh || it.summary || it.title;
     }
   }
-  return {
+  const out = {
     updated: (/* @__PURE__ */ new Date()).toISOString(),
     count: items.length,
     demo: false,
@@ -415,6 +420,8 @@ async function aggregate(feeds, opts = {}) {
     sources,
     items
   };
+  newsCache.set(NEWS_CACHE_KEY, { t: Date.now(), data: out });
+  return out;
 }
 
 // shared/community.js

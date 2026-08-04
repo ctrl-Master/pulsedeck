@@ -311,6 +311,9 @@ async function fetchWithTimeout(url, { timeout = 8000, ...init } = {}) {
  *   - translateTo: 目标语言（默认 'zh'）
  * @returns {Promise<{updated, count, demo, sources, items}>}
  */
+const newsCache = new Map();
+const NEWS_CACHE_TTL = 60000; // 同实例 60s 内存缓存，避免每次实时抓全部 RSS 源
+
 export async function aggregate(feeds, opts = {}) {
   const {
     limit = 200,
@@ -322,6 +325,11 @@ export async function aggregate(feeds, opts = {}) {
     summarizer = null,
     summarizeTo = 'zh',
   } = opts;
+
+  // 函数内短缓存：同实例 60s 内重复请求直接复用，避免每次实时抓 33 个 RSS 源
+  const NEWS_CACHE_KEY = `news:${feeds.length}:${limit}`;
+  const cached = newsCache.get(NEWS_CACHE_KEY);
+  if (cached && Date.now() - cached.t < NEWS_CACHE_TTL) return cached.data;
 
   const settled = await Promise.allSettled(
     feeds.map(async (feed) => {
@@ -405,7 +413,7 @@ export async function aggregate(feeds, opts = {}) {
     }
   }
 
-  return {
+  const out = {
     updated: new Date().toISOString(),
     count: items.length,
     demo: false,
@@ -414,4 +422,6 @@ export async function aggregate(feeds, opts = {}) {
     sources,
     items,
   };
+  newsCache.set(NEWS_CACHE_KEY, { t: Date.now(), data: out });
+  return out;
 }
