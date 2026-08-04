@@ -3,9 +3,6 @@
   "framework": null,
   "buildCommand": null,
   "outputDirectory": "public",
-  "crons": [
-    { "path": "/api/telegram", "schedule": "0 * * * *" }
-  ],
   "headers": [
     {
       "source": "/(.*)",
