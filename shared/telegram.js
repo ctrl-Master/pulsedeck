@@ -1,21 +1,31 @@
 /**
  * Pulsedeck · Telegram 科技与快讯聚合
  * -------------------------------------------------------------
- * 通过 RSSHub 的 /telegram/channel/<username> 路由批量订阅精选 Telegram 资讯频道，
- * 经「AI 智能审验 + 自动总结 + 多源标签化」后，按时间倒序输出给前端。
+ * 直接解析 Telegram 公开的免登录 Web 预览页 https://t.me/s/<username>（选项 A）：
+ *   - 该页面绝对公开、不封锁普通请求，100% 稳定，绝不会像 RSSHub 公共实例那样对
+ *     telegram 路由返回 403。
+ *   - 用 fetch 抓取 HTML，再用轻量正则提取每条消息的：
+ *       · 外层 <div data-post="username/msgid">                       → 唯一消息 id + 源定位
+ *       · <a class="tgme_widget_message_date" href>...<time datetime> → 原文链接 + 发布时间
+ *       · <div class="tgme_widget_message_text js-message_text">      → 正文（注意排除
+ *         js-message_reply_text 这种「引用原消息」的节点，它也会带 tgme_widget_message_text 类）
  *
  * 设计要点：
- *   1. 并发抓取：各频道独立 try/catch，单个 RSSHub 源挂掉不影响整体（sources[].ok=false）。
+ *   1. 并发抓取：各频道独立 try/catch，单个源挂掉不影响整体（sources[].ok=false）。
  *   2. AI 审验：调用 DeepSeek / OpenAI 兼容接口，要求模型以 JSON 输出
  *      { is_safe, summary, tags }；is_safe=false 的条目在后端静默丢弃。
  *      合规原则：只过滤高危违规红线（涉黄涉暴、未经证实涉政谣言等），
  *      普通科技/数码/开源/商业/一般性社会趋势新闻一律保留；存在争议时在 tags 加「需甄别」。
  *   3. 优雅降级：未配置 DEEPSEEK_API_KEY 时跳过 LLM，直接用原文截断作为摘要，界面照常可用。
- *   4. 缓存：模块级内存缓存 10 分钟；Vercel Cron 每小时预热一次，避免每次实时打 LLM。
- *   5. 健壮性：LLM 调用带 8s 超时与并发上限（4），单条失败不影响其他条目。
+ *   4. 缓存：模块级内存缓存 10 分钟；Vercel Cron 每小时预热一次，避免每次实时抓取。
+ *   5. 健壮性：抓取带 12s 超时与并发上限（4），单条失败不影响其他条目。
+ *
+ * 环境变量：
+ *   TG_WEB_BASE_URL   预览页基址，默认 https://t.me/s（可指向自建镜像）
+ *   DEEPSEEK_API_KEY  留空则跳过 AI 审验，走原文摘要降级
  */
 
-import { decodeEntities, cleanText, tagText, linkOf } from './xml.js';
+import { decodeEntities } from './xml.js';
 
 /* =========================== 频道配置 =========================== */
 
@@ -41,21 +51,6 @@ function getEnv(name, fallback = '') {
   return fallback;
 }
 
-function pickText(itemXml, tag) {
-  const raw = tagText(itemXml, tag);
-  return cleanText(raw);
-}
-
-/** 把 RSSHub 的 t.me/s/xxx 链接规整为可唤起 App 的 t.me/xxx */
-function normalizeTme(link = '') {
-  try {
-    const u = new URL(decodeEntities(link));
-    return u.toString().replace(/^https?:\/\/t\.me\/s\//i, 'https://t.me/');
-  } catch {
-    return link;
-  }
-}
-
 function detectLang(text = '') {
   return /[一-鿿]/.test(text) ? 'zh' : 'en';
 }
@@ -66,9 +61,28 @@ function hashId(s = '') {
   return Math.abs(h).toString(36);
 }
 
-/* =========================== RSSHub 抓取 + 解析 =========================== */
+/**
+ * 把 t.me/s 的消息正文 HTML 清洗成纯文本：
+ *   - <br> / 块级闭合标签转换行，尽量保留原消息的段落结构；
+ *   - 先去真实标签，再解 HTML 实体（交替几次，兼容 CDATA / 双重转义）；
+ *   - 压缩多余空白但不并吞换行。
+ */
+function cleanHtmlText(html) {
+  let s = String(html || '');
+  s = s.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|blockquote)>/gi, '\n');
+  for (let i = 0; i < 3; i++) {
+    s = s.replace(/<[^>]+>/g, ' ');
+    s = decodeEntities(s);
+  }
+  return s
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
 
-/** 竞速超时：无论底层连接是否响应，到时即 reject，避免函数被挂死的 RSSHub 拖到 60s 上限 */
+/* =========================== t.me/s 抓取 + 解析 =========================== */
+
+/** 竞速超时：无论底层连接是否响应，到时即 reject，避免函数被挂死的源拖到上限 */
 function withTimeout(promise, ms, label) {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -77,45 +91,76 @@ function withTimeout(promise, ms, label) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function fetchChannelXml(channel, baseUrl) {
-  const url = `${baseUrl.replace(/\/$/, '')}/telegram/channel/${channel.username}`;
+async function fetchChannelPage(channel, baseUrl) {
+  const url = `${baseUrl.replace(/\/$/, '')}/${channel.username}`;
   try {
     const res = await withTimeout(
-      fetch(url, { headers: { 'User-Agent': 'Pulsedeck/2.0 (+https://insights.hizhihao.me)' } }),
-      9000,
+      fetch(url, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+          Accept: 'text/html,application/xhtml+xml',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        },
+      }),
+      12000,
       channel.username
     );
-    if (!res.ok) throw new Error('RSSHub ' + res.status);
-    const xml = await res.text();
-    return xml;
+    if (!res.ok) throw new Error('t.me ' + res.status);
+    const html = await res.text();
+    return html;
   } catch (e) {
     throw e; // 上层按频道隔离
   }
 }
 
-/** 从一个频道的 RSS XML 中取出最新 N 条原始条目 */
-function parseItems(xml, channel, limit = 8) {
+/**
+ * 从单个频道的 t.me/s 预览页 HTML 中解析最新 N 条原始消息。
+ * 以 <div data-post="username/msgid"> 作为每条消息的边界，内部再取：
+ *   · 正文：class 含 js-message_text 的 .tgme_widget_message_text（排除 js-message_reply_text）
+ *   · 时间 + 原文链接：a.tgme_widget_message_date 内的 <time datetime> 与 href
+ */
+export function parseHtmlPage(html, channel, limit = 8) {
   const items = [];
-  const blocks = xml.match(/<item[\s>][\s\S]*?<\/item>/gi) || [];
-  for (const block of blocks) {
-    const description = pickText(block, 'description');
-    if (!description) continue;
-    const titleRaw = pickText(block, 'title');
-    const pubDate = pickText(block, 'pubDate');
-    const link = normalizeTme(linkOf(block) || '');
-    const guid = pickText(block, 'guid') || link || `${channel.username}-${items.length}`;
-    const ts = pubDate ? Date.parse(pubDate) : Date.now();
+  // 按 data-post 切分消息块，前瞻在遇到下一个 data-post / bot_id 哨兵 / </body> / 文末时收尾
+  const blockRe =
+    /<div\b[^>]*\bdata-post="([^"]+)"[^>]*>([\s\S]*?)(?=<div\b[^>]*\bdata-post=|<!--\s*bot_id\s*-->|\s*<\/body>|$)/gi;
 
-    // 标题：优先用非空 title；若 title 与 description 重复，则从 description 首行派生短标题
-    let title = titleRaw && titleRaw !== description ? titleRaw : description.split('\n')[0].slice(0, 60);
+  for (const m of html.matchAll(blockRe)) {
+    const postId = m[1]; // 形如 tnews365/35452
+    const inner = m[2];
+
+    // 正文：必须是 js-message_text（真实消息），而非 js-message_reply_text（引用原消息）
+    const textM = inner.match(
+      /<div\b[^>]*\bclass="[^"]*\bjs-message_text\b[^"]*"[^>]*>([\s\S]*?)<\/div>/i
+    );
+    if (!textM) continue;
+    const description = cleanHtmlText(textM[1]);
+    if (!description) continue;
+
+    // 原文链接 + 发布时间：定位 a.tgme_widget_message_date
+    const dateM = inner.match(
+      /<a\b[^>]*\bclass="[^"]*tgme_widget_message_date[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i
+    );
+    const link = dateM ? decodeEntities(dateM[1]).replace(/\/s\//, '/') : `https://t.me/${postId}`;
+    let ts = Date.now();
+    const timeSrc = dateM ? dateM[2] : inner;
+    const timeM = timeSrc.match(/<time\b[^>]*\bdatetime="([^"]+)"/i);
+    if (timeM) {
+      const p = Date.parse(timeM[1]);
+      if (!Number.isNaN(p)) ts = p;
+    }
+
+    const msgid = postId.split('/')[1] || postId;
+    const title = description.split('\n')[0].slice(0, 60);
 
     items.push({
       _channel: channel.username,
-      id: `${channel.username}-${hashId(guid)}`,
+      id: `${channel.username}-${msgid}`,
       title: title.slice(0, 80),
       description, // 原始全文
       link,
-      timestamp: Number.isNaN(ts) ? Date.now() : ts,
+      timestamp: ts,
       category: channel.username, // 用于前端来源筛选（唯一键）
       source: channel.name,
       tag: channel.tag,
@@ -222,17 +267,17 @@ export async function aggregateTelegram({ fresh = false } = {}) {
     return cached.data;
   }
 
-  const baseUrl = getEnv('RSSHUB_BASE_URL', 'https://rsshub.app');
+  const baseUrl = getEnv('TG_WEB_BASE_URL', 'https://t.me/s');
   const apiKey = getEnv('DEEPSEEK_API_KEY', '');
   const llmBase = getEnv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com');
   const useLLM = !!apiKey;
 
-  // 1) 并发抓各频道（彼此隔离）
+  // 1) 并发抓各频道（彼此隔离），直接解析 t.me/s 预览页
   const channelResults = await Promise.all(
     TG_CHANNELS.map(async (ch) => {
       try {
-        const xml = await fetchChannelXml(ch, baseUrl);
-        const items = parseItems(xml, ch, 8);
+        const html = await fetchChannelPage(ch, baseUrl);
+        const items = parseHtmlPage(html, ch, 8);
         return { channel: ch, items, ok: true, error: '' };
       } catch (e) {
         return { channel: ch, items: [], ok: false, error: String((e && e.message) || e) };
@@ -278,7 +323,7 @@ export async function aggregateTelegram({ fresh = false } = {}) {
     demo: false,
     note:
       merged.length === 0
-        ? '本次未抓取到任何 Telegram 内容，可能是 RSSHub 实例不可用或所有频道临时不可达，请稍后重试或检查 RSSHUB_BASE_URL。'
+        ? '本次未抓取到任何 Telegram 内容，可能是 t.me/s 预览页临时不可达或频道被限制，请稍后重试（可检查 TG_WEB_BASE_URL）。'
         : useLLM
         ? ''
         : '未配置 DEEPSEEK_API_KEY，已使用原文摘要（未启用 AI 审验/总结）。',
