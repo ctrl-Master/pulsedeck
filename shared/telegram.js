@@ -68,20 +68,28 @@ function hashId(s = '') {
 
 /* =========================== RSSHub 抓取 + 解析 =========================== */
 
+/** 竞速超时：无论底层连接是否响应，到时即 reject，避免函数被挂死的 RSSHub 拖到 60s 上限 */
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error('timeout:' + label)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function fetchChannelXml(channel, baseUrl) {
   const url = `${baseUrl.replace(/\/$/, '')}/telegram/channel/${channel.username}`;
-  const ctrl = new AbortController();
-  const to = setTimeout(() => ctrl.abort(), 12000);
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout ? AbortSignal.timeout(12000) : ctrl.signal,
-      headers: { 'User-Agent': 'Pulsedeck/2.0 (+https://insights.hizhihao.me)' },
-    });
+    const res = await withTimeout(
+      fetch(url, { headers: { 'User-Agent': 'Pulsedeck/2.0 (+https://insights.hizhihao.me)' } }),
+      9000,
+      channel.username
+    );
     if (!res.ok) throw new Error('RSSHub ' + res.status);
     const xml = await res.text();
     return xml;
-  } finally {
-    clearTimeout(to);
+  } catch (e) {
+    throw e; // 上层按频道隔离
   }
 }
 
