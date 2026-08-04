@@ -9,6 +9,7 @@
  *   /api/news        聚合新闻（?demo=1 用演示数据，?community=1 切换社区）
  *   /api/feeds       源配置
  *   /api/config      前端配置（分类 + 源概览）
+ *   /api/telegram    Telegram 科技与快讯聚合（?fresh=1 强制刷新，?cron=1 由 Vercel Cron 预热）
  *   /api/translate   翻译代理（body: { text, to }）
  *   /api/img         占位图（?w=&h=&t=）
  *   /api/health      健康检查
@@ -17,6 +18,7 @@
 import { FEEDS, CATEGORIES } from '../shared/feeds.js';
 import { aggregate } from '../shared/aggregate.js';
 import { aggregateCommunity } from '../shared/community.js';
+import { aggregateTelegram, TG_CHANNELS } from '../shared/telegram.js';
 import { makeTranslator } from '../shared/translate.js';
 import { makeSummarizer } from '../shared/summarize.js';
 import { buildSampleData } from '../shared/sample-data.js';
@@ -115,6 +117,27 @@ const server = {
     }
   },
 
+  async handleTelegram(params, req, isNode) {
+    const fresh = params.get('fresh') === '1';
+    const cron = params.get('cron') === '1';
+
+    // Vercel Cron 预热：校验 CRON_SECRET（支持 query ?secret= 或 Vercel 默认 Authorization: Bearer）
+    if (cron) {
+      const secret = (typeof process !== 'undefined' && process.env && process.env.CRON_SECRET) || '';
+      if (secret) {
+        const auth = getHeader(req, isNode, 'authorization') || '';
+        const qSecret = params.get('secret') || '';
+        const ok = qSecret === secret || auth === `Bearer ${secret}`;
+        if (!ok) return json({ ok: false, error: 'unauthorized' }, 401);
+      }
+      const data = await aggregateTelegram({ fresh: true });
+      return json({ ok: true, count: data.items.length, sources: data.sources });
+    }
+
+    const data = await aggregateTelegram({ fresh });
+    return json(data);
+  },
+
   async handleImg(params) {
     const w = Math.min(Math.max(Number(params.get('w')) || 600, 50), 2000);
     const h = Math.min(Math.max(Number(params.get('h')) || 400, 50), 2000);
@@ -148,6 +171,16 @@ function readNodeBody(req) {
     req.on('end', () => resolve(data));
     req.on('error', () => resolve(''));
   });
+}
+
+// 兼容 Node(req.headers 对象) / Edge(req.headers.get) 两种方式读取请求头
+function getHeader(req, isNode, name) {
+  if (isNode) return (req && req.headers && req.headers[name.toLowerCase()]) || '';
+  try {
+    return (req && req.headers && req.headers.get(name)) || '';
+  } catch {
+    return '';
+  }
 }
 
 export default async function handler(req, res) {
@@ -200,6 +233,9 @@ export default async function handler(req, res) {
         break;
       case 'health':
         result = server.handleHealth();
+        break;
+      case 'telegram':
+        result = await server.handleTelegram(searchParams, req, isNode);
         break;
       default:
         result = json({ ok: false, error: `unknown route: ${pathname}` }, 404);

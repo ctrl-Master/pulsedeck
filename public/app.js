@@ -262,12 +262,15 @@ async function translateText(text, pair) {
 async function translateItem(it) {
   if (!it || it._tr) return;
   const pair = trPair(it.lang);
-  const [titleZh, summaryZh] = await Promise.all([
+  // 不仅翻译标题与摘要，也翻译出现的短文（原文片段 description），满足「短文也翻一下」
+  const [titleZh, summaryZh, descZh] = await Promise.all([
     translateText(it.title, pair),
     it.summary ? translateText(it.summary, pair) : Promise.resolve(''),
+    it.description ? translateText(it.description, pair) : Promise.resolve(''),
   ]);
   if (titleZh) it.titleZh = titleZh;
   if (summaryZh) it.summaryZh = summaryZh;
+  if (descZh) it.descriptionZh = descZh;
   it._tr = true;
 }
 
@@ -757,6 +760,15 @@ function render() {
     return;
   }
 
+  if (state.prefs.mode === 'telegram') {
+    const list = visibleItems();
+    el.stage.innerHTML = list.length ? viewTelegram(list) : viewEmpty();
+    renderCats();
+    renderFoot(list);
+    state.cursor = -1;
+    return;
+  }
+
   const list = visibleItems();
   const view = VIEWS[state.prefs.layout] || viewCards;
   el.stage.innerHTML = list.length ? view(list) : viewEmpty();
@@ -1128,9 +1140,105 @@ async function loadFeeds({ fresh = false } = {}) {
   }
 }
 
-/* 根据当前模式选择加载器（科技新闻 / 社区热点） */
+/* 根据当前模式选择加载器（科技新闻 / 社区热点 / Telegram 快讯） */
 function loadActive({ fresh = false } = {}) {
-  return state.prefs.mode === 'community' ? loadFeeds({ fresh }) : loadNews({ fresh });
+  if (state.prefs.mode === 'community') return loadFeeds({ fresh });
+  if (state.prefs.mode === 'telegram') return loadTelegram({ fresh });
+  return loadNews({ fresh });
+}
+
+/* Telegram 科技与快讯聚合加载（竹新社 / 风向旗 / IT之家 / 少数派 / AI前沿 / GitHub趋势）。
+   服务端已把条目归一化成与 /api/news 相同的形状，并额外带 tag / channelCategory / description。 */
+async function loadTelegram({ fresh = false } = {}) {
+  state.loading = true;
+  state.prefs.category = 'all'; // 进入该模式默认看全部来源
+  document.getElementById('refreshBtn')?.classList.add('spin');
+  if (fresh || !state.data.items.length) el.stage.innerHTML = viewSkeleton();
+
+  const params = new URLSearchParams();
+  if (fresh) params.set('fresh', '1');
+
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), 30000);
+  try {
+    const res = await fetch(`${API_BASE}/api/telegram?${params}`, { signal: ctrl.signal });
+    if (!res.ok) throw new Error('接口返回 ' + res.status);
+    const data = await res.json();
+    state.data = { note: '', ...data };
+    // 来源筛选条：每个频道一个分类（id=频道用户名，与 item.category 对齐）
+    const cats = [{ id: 'all', name: '全部' }];
+    for (const s of state.data.sources || []) cats.push({ id: s.id, name: s.name });
+    state.config.categories = cats;
+  } catch (err) {
+    if (!state.data.items.length) {
+      state.data = {
+        items: [],
+        count: 0,
+        sources: [],
+        note: `加载失败：${err.message}`,
+        demo: false,
+      };
+    } else {
+      state.data = { ...state.data, note: `加载失败：${err.message}` };
+    }
+  } finally {
+    clearTimeout(to);
+    state.loading = false;
+    document.getElementById('refreshBtn')?.classList.remove('spin');
+  }
+
+  renderNotice();
+  render();
+
+  if (state.prefs.translate) translateVisible();
+
+  if (fresh) {
+    el.stage.classList.add('stage-flash');
+    setTimeout(() => el.stage.classList.remove('stage-flash'), 600);
+    toast(`已刷新 · ${state.data.items.length} 条`);
+  }
+}
+
+/* 各频道 Badge 配色（与后端 channelCategory 对应） */
+function tgColor(cat = '') {
+  const map = {
+    综合快讯: '#2563eb',
+    深度参考: '#7c3aed',
+    数码科技: '#0ea5e9',
+    效率工具: '#16a34a',
+    大模型: '#db2777',
+    开发者: '#ea580c',
+  };
+  return map[cat] || '#64748b';
+}
+
+/* Telegram 快讯卡片：来源 Badge + 相对时间 + AI 摘要 + 关键词 + 折叠原文 + 跳转 t.me */
+function viewTelegram(list) {
+  return `<div class="lay-cards">${list
+    .map(
+      (it, i) => `<article class="card tg-card${cls(it)}" data-id="${esc(it.id)}">
+      ${state.prefs.images && it.image ? `<img class="thumb" loading="lazy" src="${esc(imgSrc(it, i))}" alt="" onerror="this.remove()" />` : ''}
+      <div class="card-body">
+        <div class="meta">
+          <span class="badge tg-badge" style="--c:${tgColor(it.channelCategory)}">${esc(it.tag)}</span>
+          <span>${timeAgo(it.timestamp)}</span>
+        </div>
+        <h2 class="ttl" data-open="${esc(it.id)}">${esc(it.title)}${zhTitle(it)}</h2>
+        ${summaryHTML(it)}
+        ${(it.tags || []).length ? `<div class="card-tags">${it.tags.map((t) => `<span class="badge sm">#${esc(t)}</span>`).join('')}</div>` : ''}
+        <details class="tg-orig">
+          <summary>查看原文片段</summary>
+          <div class="tg-orig-body">${esc(it.description)}${it.descriptionZh ? `<span class="zh">${esc(it.descriptionZh)}</span>` : ''}</div>
+        </details>
+        <div class="card-foot">
+          <a class="btn small" href="${esc(it.link)}" target="_blank" rel="noopener">🔗 跳转 Telegram 原文</a>
+          ${starHTML(it)}
+          ${trBtnHTML(it)}
+        </div>
+      </div>
+    </article>`
+    )
+    .join('')}</div>`;
 }
 
 /* ------------------------- 事件绑定 ------------------------- */
@@ -1158,6 +1266,9 @@ function bind() {
 
     if (e.target.closest('a')) return;
 
+    // 折叠原文区：让 <details> 自行展开/收起，不触发卡片打开
+    if (e.target.closest('.tg-orig')) return;
+
     const card = e.target.closest('[data-id]');
     if (card) openItem(card.dataset.id);
   });
@@ -1184,8 +1295,11 @@ function bind() {
     el.brandSub.textContent =
       m === 'community'
         ? '社区热点'
+        : m === 'telegram'
+        ? '资讯聚合'
         : LAYOUTS.find((l) => l.id === state.prefs.layout)?.name || '资讯';
     if (m === 'community') loadFeeds(); // 切换即加载对应数据
+    else if (m === 'telegram') loadTelegram();
     else loadNews();
   });
 
@@ -1365,15 +1479,16 @@ async function boot() {
     el.sort.value = state.prefs.sort;
     document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('on', b.dataset.mode === state.prefs.mode));
     if (state.prefs.mode === 'community') el.brandSub.textContent = '社区热点';
+    else if (state.prefs.mode === 'telegram') el.brandSub.textContent = '资讯聚合';
     bind();
     /* 先渲染一份演示数据，保证页面「秒出内容」：即使后端接口挂起/超时，
        也不会卡在空白或“没有匹配的内容”。后端恢复后会自动加载真实数据。
        仅科技资讯模式需要预填（社区模式由 loadFeeds 自带兜底）。 */
-    if (state.prefs.mode !== 'community') state.data = buildNewsSample();
+    if (state.prefs.mode === 'tech') state.data = buildNewsSample();
     render();
     await loadConfig();
     renderSources();
-    await (state.prefs.mode === 'community' ? loadFeeds() : loadNews());
+    await (state.prefs.mode === 'community' ? loadFeeds() : state.prefs.mode === 'telegram' ? loadTelegram() : loadNews());
   } catch (err) {
     surfaceError('启动失败：' + (err && err.message ? err.message : err));
   }
