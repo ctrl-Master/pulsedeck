@@ -1246,39 +1246,77 @@ function safeUrl(req) {
     return new URL("/", "http://localhost");
   }
 }
-async function handler(req) {
+function readNodeBody(req) {
+  if (!req || req.method === "GET" || req.method === "HEAD") return Promise.resolve("");
+  return new Promise((resolve) => {
+    let data = "";
+    req.on("data", (chunk) => {
+      data += chunk;
+    });
+    req.on("end", () => resolve(data));
+    req.on("error", () => resolve(""));
+  });
+}
+async function handler(req, res) {
+  const isNode = !!(res && typeof res.end === "function");
+  let pathname, searchParams, method, bodyText = "";
+  if (isNode) {
+    const u = new URL(req.url || "/", "http://localhost");
+    pathname = u.pathname;
+    searchParams = u.searchParams;
+    method = req.method || "GET";
+  } else {
+    const u = safeUrl(req);
+    pathname = u.pathname;
+    searchParams = u.searchParams;
+    method = req.method || "GET";
+  }
+  const route = pathname.replace(/^\/api\//, "").split("/")[0];
+  let result;
   try {
-    const url = safeUrl(req);
-    const { pathname, searchParams } = url;
-    const route = pathname.replace(/^\/api\//, "").split("/")[0];
     switch (route) {
       case "news":
-        return await server.handleNews(searchParams);
+        result = await server.handleNews(searchParams);
+        break;
       case "feeds":
-        return await server.handleFeeds();
+        result = await server.handleFeeds();
+        break;
       case "config":
-        return await server.handleConfig();
+        result = await server.handleConfig();
+        break;
       case "translate":
-        if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
-        return await server.handleTranslate(req);
+        if (method === "OPTIONS") {
+          result = new Response(null, { status: 204, headers: CORS });
+          break;
+        }
+        if (isNode) bodyText = await readNodeBody(req);
+        else bodyText = await req.text().catch(() => "");
+        result = await server.handleTranslate({ json: async () => JSON.parse(bodyText || "{}"), method });
+        break;
       case "img":
-        return await server.handleImg(searchParams);
+        result = await server.handleImg(searchParams);
+        break;
       case "health":
-        return server.handleHealth();
+        result = server.handleHealth();
+        break;
       default:
-        return json({ ok: false, error: `unknown route: ${pathname}` }, 404);
+        result = json({ ok: false, error: `unknown route: ${pathname}` }, 404);
     }
   } catch (e) {
-    return json(
+    result = json(
       { ok: false, error: String(e && e.message || e), stack: String(e && e.stack || "").slice(0, 600) },
       500
     );
   }
+  if (isNode) {
+    const body = await result.text();
+    res.statusCode = result.status;
+    result.headers.forEach((value, key) => res.setHeader(key, value));
+    res.end(Buffer.from(body));
+  } else {
+    return result;
+  }
 }
-var runtime = "nodejs";
-var maxDuration = 60;
-export {
-  handler as default,
-  maxDuration,
-  runtime
-};
+export const runtime = "nodejs";
+export const maxDuration = 60;
+export { handler as default };

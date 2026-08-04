@@ -114,9 +114,9 @@ const server = {
   },
 };
 
-// 注意：Vercel Node 运行时传给 ESM 默认导出的 req 既可能是标准 Web Request
-// （req.url 为绝对地址），也可能在某些版本/桥接下表现为相对路径。
-// 这里对 URL 解析做容错，并把解析放进 try，确保任何错误都返回 JSON 而非裸崩。
+// Vercel `api/` 目录的 Node.js 函数签名是 (req: IncomingMessage, res: ServerResponse)，
+// 必须自己写 res；直接 return Web Response 在 Node 运行时不会被消费，会一直挂到超时。
+// 这里同时兼容 Edge（只收到 Web Request、无 res）与 Node（收到 res）两种调用方式。
 function safeUrl(req) {
   const raw = (req && (req.url || (req.request && req.request.url))) || '/';
   try {
@@ -126,40 +126,84 @@ function safeUrl(req) {
   }
 }
 
-export default async function handler(req) {
-  try {
-    const url = safeUrl(req);
-    const { pathname, searchParams } = url;
-    const route = pathname.replace(/^\/api\//, '').split('/')[0];
+// Node IncomingMessage 读取请求体（Edge 用 req.text()）
+function readNodeBody(req) {
+  if (!req || req.method === 'GET' || req.method === 'HEAD') return Promise.resolve('');
+  return new Promise((resolve) => {
+    let data = '';
+    req.on('data', (chunk) => { data += chunk; });
+    req.on('end', () => resolve(data));
+    req.on('error', () => resolve(''));
+  });
+}
 
+export default async function handler(req, res) {
+  const isNode = !!(res && typeof res.end === 'function');
+
+  let pathname, searchParams, method, bodyText = '';
+  if (isNode) {
+    const u = new URL(req.url || '/', 'http://localhost');
+    pathname = u.pathname;
+    searchParams = u.searchParams;
+    method = req.method || 'GET';
+  } else {
+    // Edge / Web 标准：req 是 Request
+    const u = safeUrl(req);
+    pathname = u.pathname;
+    searchParams = u.searchParams;
+    method = req.method || 'GET';
+  }
+
+  const route = pathname.replace(/^\/api\//, '').split('/')[0];
+  let result;
+  try {
     switch (route) {
       case 'news':
-        return await server.handleNews(searchParams);
+        result = await server.handleNews(searchParams);
+        break;
       case 'feeds':
-        return await server.handleFeeds();
+        result = await server.handleFeeds();
+        break;
       case 'config':
-        return await server.handleConfig();
+        result = await server.handleConfig();
+        break;
       case 'translate':
-        if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
-        return await server.handleTranslate(req);
+        if (method === 'OPTIONS') {
+          result = new Response(null, { status: 204, headers: CORS });
+          break;
+        }
+        if (isNode) bodyText = await readNodeBody(req);
+        else bodyText = await req.text().catch(() => '');
+        result = await server.handleTranslate({ json: async () => JSON.parse(bodyText || '{}'), method });
+        break;
       case 'img':
-        return await server.handleImg(searchParams);
+        result = await server.handleImg(searchParams);
+        break;
       case 'health':
-        return server.handleHealth();
+        result = server.handleHealth();
+        break;
       default:
-        return json({ ok: false, error: `unknown route: ${pathname}` }, 404);
+        result = json({ ok: false, error: `unknown route: ${pathname}` }, 404);
     }
   } catch (e) {
-    return json(
+    result = json(
       { ok: false, error: String((e && e.message) || e), stack: String((e && e.stack) || '').slice(0, 600) },
       500
     );
   }
+
+  if (isNode) {
+    const body = await result.text();
+    res.statusCode = result.status;
+    result.headers.forEach((value, key) => res.setHeader(key, value));
+    res.end(Buffer.from(body));
+  } else {
+    return result;
+  }
 }
 
-// 用 Node.js 运行时：Vercel 的 Node 18+/20 运行时原生提供 fetch / Request /
-// Response / URL / AbortSignal 等 Web 标准全局，本函数零 Node 专用 API，
-// 因此在 Node 运行时下最稳定（已用本地 Node 22 实测全路由 200）。
+// Node.js 运行时：Vercel 的 api/ 目录 Node 函数以 (req, res) 调用，最稳定。
 // 服务端翻译仍走「假 env.AI」no-op，真正的英译中由前端浏览器侧 MyMemory 完成。
+// 用 export const 形式声明，确保 Vercel 静态分析能识别运行时与超时配置。
 export const runtime = 'nodejs';
 export const maxDuration = 60;
