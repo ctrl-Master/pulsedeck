@@ -448,7 +448,7 @@ var FULLTEXT_CONCURRENCY = 4;
 var FULLTEXT_TIMEOUT = 5e3;
 var MAX_FULLTEXT_LENGTH = 1600;
 var CANDIDATE_TOP = 60;
-var COMMUNITY_CACHE_SECONDS = 300;
+var COMMUNITY_CACHE_SECONDS = 1800;
 async function fetchRaw(url, timeout) {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), timeout);

@@ -58,7 +58,7 @@ const FULLTEXT_CONCURRENCY = 4;
 const FULLTEXT_TIMEOUT = 5000;
 const MAX_FULLTEXT_LENGTH = 1600;
 const CANDIDATE_TOP = 60; // 先按时间取前 60 条作为候选，再对其中的 top 8 做全文
-const COMMUNITY_CACHE_SECONDS = 300;
+const COMMUNITY_CACHE_SECONDS = 1800; // 30 分钟（与 telegram 对齐：首次拉取后缓存，30 分钟内复用，超时才重抓）
 
 /* ------------------------------ 网络 ------------------------------ */
 

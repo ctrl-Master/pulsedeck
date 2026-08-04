@@ -866,6 +866,11 @@ function closeOverlays() {
   document.getElementById('readerPane')?.classList.remove('mobile-open');
 }
 
+/* 加载请求序号：每次发起加载(loadNews/loadFeeds/loadTelegram)自增，
+   请求完成后若序号已变化（用户切了菜单/点了刷新），则丢弃本次结果，
+   避免慢请求后回来把「旧菜单内容」渲染进当前视图——这是切菜单偶现空白/串内容的根因。 */
+let loadSeq = 0;
+
 /* ------------------------- 拉数据 ------------------------- */
 
 async function loadConfig() {
@@ -884,6 +889,7 @@ async function loadConfig() {
 }
 
 async function loadNews({ fresh = false } = {}) {
+  const mySeq = ++loadSeq;
   state.loading = true;
   document.getElementById('refreshBtn')?.classList.add('spin');
   /* 刷新时：即使有旧数据也立刻显示骨架屏，让用户知道「正在干活」 */
@@ -927,6 +933,7 @@ async function loadNews({ fresh = false } = {}) {
     document.getElementById('refreshBtn')?.classList.remove('spin');
   }
 
+  if (mySeq !== loadSeq) return; // 已被更新的加载取代（切菜单/刷新），丢弃过期结果，防串内容
   if (state.data.categories?.length) state.config.categories = state.data.categories;
   renderNotice();
   renderSources();
@@ -1067,6 +1074,7 @@ function buildNewsSample() {
 /* 社区热点加载（知乎 / 虎扑 / 贴吧 / Reddit）。服务端已把条目归一化成与
    /api/news 相同的形状，前端可直接复用渲染、搜索、排序与翻译。 */
 async function loadFeeds({ fresh = false } = {}) {
+  const mySeq = ++loadSeq;
   state.loading = true;
   document.getElementById('refreshBtn')?.classList.add('spin');
   if (fresh || !state.data.items.length) {
@@ -1110,7 +1118,7 @@ async function loadFeeds({ fresh = false } = {}) {
     state.data = buildCommunitySample();
     state.config.categories = state.data.categories;
     }
-    if (!state.data.items.length) {
+    if (!state.data.items.length && mySeq === loadSeq) {
       el.stage.innerHTML = `<div class="fatal">
         <div class="big">⚠</div>
         <p class="fmsg">加载失败：${esc(err.message || err)}</p>
@@ -1126,6 +1134,7 @@ async function loadFeeds({ fresh = false } = {}) {
     document.getElementById('refreshBtn')?.classList.remove('spin');
   }
 
+  if (mySeq !== loadSeq) return; // 已被更新的加载取代，丢弃过期结果，防串内容/空白
   renderNotice();
   renderSources();
   render();
@@ -1150,6 +1159,7 @@ function loadActive({ fresh = false } = {}) {
 /* Telegram 科技与快讯聚合加载（竹新社 / 风向旗 / IT之家 / 少数派 / AI前沿 / GitHub趋势）。
    服务端已把条目归一化成与 /api/news 相同的形状，并额外带 tag / channelCategory / description。 */
 async function loadTelegram({ fresh = false } = {}) {
+  const mySeq = ++loadSeq;
   state.loading = true;
   state.prefs.category = 'all'; // 进入该模式默认看全部来源
   document.getElementById('refreshBtn')?.classList.add('spin');
@@ -1187,6 +1197,7 @@ async function loadTelegram({ fresh = false } = {}) {
     document.getElementById('refreshBtn')?.classList.remove('spin');
   }
 
+  if (mySeq !== loadSeq) return; // 已被更新的加载取代，丢弃过期结果，防串内容/空白
   renderNotice();
   render();
 
@@ -1454,7 +1465,7 @@ function bind() {
   });
 
   // 每 10 分钟自动刷新一次（按当前模式）
-  setInterval(() => { if (!document.hidden) loadActive(); }, 10 * 60 * 1000);
+  setInterval(() => { if (!document.hidden && !state.loading) loadActive(); }, 10 * 60 * 1000);
 }
 
 function moveCursor(delta) {

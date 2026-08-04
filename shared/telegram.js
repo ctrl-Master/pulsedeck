@@ -42,7 +42,7 @@ export const TG_CHANNELS = [
 
 const CACHE = new Map();
 const CACHE_KEY = 'tg-aggregate';
-const CACHE_TTL = 10 * 60 * 1000; // 10 分钟
+const CACHE_TTL = 30 * 60 * 1000; // 30 分钟：首次拉取后缓存，30 分钟内复用，超时才重抓
 
 /* =========================== 工具 =========================== */
 
