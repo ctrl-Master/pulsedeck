@@ -4,6 +4,9 @@
  * 专门承接 /api/telegram，使 Vercel Cron（vercel.json 中每小时触发）
  * 能精确定位到本函数，而非仅依赖 api/[...path].js 的 catch-all 兜底。
  * 逻辑与 src/vercel-entry.js 的 handleTelegram 保持一致，复用 shared/telegram.js。
+ *
+ * 重要：Vercel Node 运行时以 (req, res) 调用本函数，必须自己 res.end() 写回；
+ * 直接 return Web Response 在 Node 模式不会被消费，会一直挂到 maxDuration 超时。
  */
 import { aggregateTelegram } from '../shared/telegram.js';
 
@@ -13,7 +16,7 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
-function json(data, status = 200) {
+function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { 'Content-Type': 'application/json; charset=utf-8', ...CORS },
@@ -43,7 +46,16 @@ export default async function handler(req, res) {
     method = req.method || 'GET';
   }
 
-  if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  if (method === 'OPTIONS') {
+    if (isNode) {
+      res.statusCode = 204;
+      for (const [k, v] of Object.entries(CORS)) res.setHeader(k, v);
+      res.end();
+    } else {
+      return new Response(null, { status: 204, headers: CORS });
+    }
+    return;
+  }
 
   const fresh = searchParams.get('fresh') === '1';
   const cron = searchParams.get('cron') === '1';
@@ -55,14 +67,36 @@ export default async function handler(req, res) {
       const auth = getHeader(req, isNode, 'authorization') || '';
       const qSecret = searchParams.get('secret') || '';
       const ok = qSecret === secret || auth === `Bearer ${secret}`;
-      if (!ok) return json({ ok: false, error: 'unauthorized' }, 401);
+      if (!ok) {
+        const body = JSON.stringify({ ok: false, error: 'unauthorized' });
+        if (isNode) {
+          res.statusCode = 401;
+          res.setHeader('content-type', 'application/json; charset=utf-8');
+          res.end(Buffer.from(body));
+        } else {
+          return jsonResponse({ ok: false, error: 'unauthorized' }, 401);
+        }
+        return;
+      }
     }
     const data = await aggregateTelegram({ fresh: true });
-    return json({ ok: true, count: data.items.length, sources: data.sources });
+    return send(isNode, res, { ok: true, count: data.items.length, sources: data.sources });
   }
 
   const data = await aggregateTelegram({ fresh });
-  return json(data);
+  return send(isNode, res, data);
+}
+
+function send(isNode, res, data) {
+  const body = JSON.stringify(data);
+  if (isNode) {
+    res.statusCode = 200;
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.setHeader('access-control-allow-origin', '*');
+    res.end(Buffer.from(body));
+  } else {
+    return jsonResponse(data, 200);
+  }
 }
 
 // 用 export const 形式声明，确保 Vercel 静态分析能识别运行时与超时配置。
