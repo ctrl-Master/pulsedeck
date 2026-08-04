@@ -244,7 +244,7 @@ async function translateText(text, pair) {
   if (trCache.has(key)) return trCache.get(key);
   // 改走同源 /api/translate（Vercel 函数代理 MyMemory），避免浏览器直连被墙/CORS
   try {
-    const res = await fetch(`${API_BASE}/api/translate`, {
+    const res = await apiFetch(`${API_BASE}/api/translate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: src.slice(0, 480), pair }),
@@ -872,7 +872,7 @@ async function loadConfig() {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 12000);
   try {
-    const res = await fetch(`${API_BASE}/api/config`, { signal: ctrl.signal });
+    const res = await apiFetch(`${API_BASE}/api/config`, { signal: ctrl.signal });
     if (!res.ok) throw new Error('接口返回 ' + res.status);
     state.config = await res.json();
   } catch {
@@ -908,7 +908,7 @@ async function loadNews({ fresh = false } = {}) {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 30000);
   try {
-    const res = await fetch(`${API_BASE}/api/news?${params}`, { signal: ctrl.signal });
+    const res = await apiFetch(`${API_BASE}/api/news?${params}`, { signal: ctrl.signal });
     if (!res.ok) throw new Error('接口返回 ' + res.status);
     const data = await res.json();
     state.data = { note: '', ...data };
@@ -1079,7 +1079,7 @@ async function loadFeeds({ fresh = false } = {}) {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 30000);
   try {
-    const res = await fetch(`${API_BASE}/api/news?community=1&${params}`, { signal: ctrl.signal });
+    const res = await apiFetch(`${API_BASE}/api/news?community=1&${params}`, { signal: ctrl.signal });
     if (!res.ok) throw new Error('接口返回 ' + res.status);
     const data = await res.json();
     state.data = { note: '', ...data };
@@ -1161,7 +1161,7 @@ async function loadTelegram({ fresh = false } = {}) {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 30000);
   try {
-    const res = await fetch(`${API_BASE}/api/telegram?${params}`, { signal: ctrl.signal });
+    const res = await apiFetch(`${API_BASE}/api/telegram?${params}`, { signal: ctrl.signal });
     if (!res.ok) throw new Error('接口返回 ' + res.status);
     const data = await res.json();
     state.data = { note: '', ...data };
@@ -1244,6 +1244,8 @@ function viewTelegram(list) {
 /* ------------------------- 事件绑定 ------------------------- */
 
 function bind() {
+  if (bind._done) return;
+  bind._done = true;
   // 舞台委托
   el.stage.addEventListener('click', (e) => {
     const star = e.target.closest('[data-star]');
@@ -1490,34 +1492,99 @@ async function boot() {
     renderSources();
     await (state.prefs.mode === 'community' ? loadFeeds() : state.prefs.mode === 'telegram' ? loadTelegram() : loadNews());
   } catch (err) {
+    if (err && err.message === 'AUTH_REQUIRED') return; // 被踢出门，showGate 已处理
     surfaceError('启动失败：' + (err && err.message ? err.message : err));
   }
 }
 
-/* ------------------------- 登录门（个人网站访问控制） ------------------------- */
-const GATE_USER = 'admin';
-const GATE_PASS = 'admin123';
-function tryGate() {
+/* ------------------------- 登录门 + 并发会话（最多 3 人，超出踢最旧） ------------------------- */
+const AUTH_KEY = 'pd_auth_token';
+let authPollTimer = null;
+
+function getToken() { return localStorage.getItem(AUTH_KEY) || ''; }
+function setToken(t) { if (t) localStorage.setItem(AUTH_KEY, t); else localStorage.removeItem(AUTH_KEY); }
+
+async function authLoginRemote(user, pass) {
+  try {
+    const r = await fetch(`${API_BASE}/api/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user, pass }),
+    });
+    if (!r.ok) return null;
+    const j = await r.json().catch(() => ({}));
+    return j && j.ok ? j.token : null;
+  } catch { return null; }
+}
+
+async function authCheckRemote() {
+  const t = getToken();
+  if (!t) return false;
+  try {
+    const r = await fetch(`${API_BASE}/api/auth?token=${encodeURIComponent(t)}`, { signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined });
+    if (!r.ok) return false;
+    const j = await r.json().catch(() => ({}));
+    return !!(j && j.ok);
+  } catch { return false; }
+}
+
+function startAuthPoll() {
+  stopAuthPoll();
+  authPollTimer = setInterval(async () => {
+    if (!(await authCheckRemote())) { setToken(''); showGate(true); }
+  }, 30000);
+}
+function stopAuthPoll() { if (authPollTimer) { clearInterval(authPollTimer); authPollTimer = null; } }
+
+// 统一带鉴权头的请求；401 视为被踢/过期 → 弹登录门（表单已预填，一键进入）
+async function apiFetch(url, opts = {}) {
+  const t = getToken();
+  const headers = Object.assign({}, opts.headers || {});
+  if (t) headers['Authorization'] = 'Bearer ' + t;
+  const res = await fetch(url, Object.assign({}, opts, { headers }));
+  if (res.status === 401) {
+    setToken('');
+    showGate(true);
+    throw new Error('AUTH_REQUIRED');
+  }
+  return res;
+}
+
+function showGate(reAuth) {
   const gate = document.getElementById('gate');
-  if (sessionStorage.getItem('pd_gate') === '1') { gate && gate.remove(); boot(); return; }
-  if (!gate) { boot(); return; }
-  const u = gate.querySelector('#gateUser');
-  const p = gate.querySelector('#gatePwd');
+  if (!gate) return;
+  gate.hidden = false;
+  gate.style.display = '';
   const err = gate.querySelector('#gateErr');
-  const submit = () => {
-    if (u.value === GATE_USER && p.value === GATE_PASS) {
-      sessionStorage.setItem('pd_gate', '1');
-      gate.remove();
+  if (err) { err.hidden = true; err.textContent = ''; }
+  const pwd = gate.querySelector('#gatePwd');
+  pwd && pwd.focus();
+  const submit = async () => {
+    const u = (gate.querySelector('#gateUser').value || '').trim();
+    const pw = gate.querySelector('#gatePwd').value || '';
+    const token = await authLoginRemote(u, pw);
+    if (token) {
+      setToken(token);
+      gate.hidden = true; gate.style.display = 'none';
+      stopAuthPoll(); startAuthPoll();
       boot();
     } else {
-      err.textContent = '用户名或密码错误';
-      err.hidden = false;
-      p.value = '';
-      p.focus();
+      if (err) { err.textContent = '用户名或密码错误'; err.hidden = false; }
+      const p = gate.querySelector('#gatePwd'); if (p) p.value = '';
     }
   };
-  gate.querySelector('#gateBtn').addEventListener('click', submit);
-  p.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-  u.focus();
+  const btn = gate.querySelector('#gateBtn'); if (btn) btn.onclick = submit;
+  if (pwd) pwd.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
 }
-tryGate();
+
+async function startApp() {
+  if (await authCheckRemote()) {
+    const g = document.getElementById('gate');
+    if (g) { g.hidden = true; g.style.display = 'none'; }
+    stopAuthPoll(); startAuthPoll(); boot();
+  } else {
+    showGate(false);
+  }
+}
+
+startApp();

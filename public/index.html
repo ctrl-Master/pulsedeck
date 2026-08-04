@@ -9,8 +9,8 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232563eb'/%3E%3Cpath d='M6 20l4-8 4 5 3-9 4 12 5-6' fill='none' stroke='white' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="./styles.css" />
 <style>
-  .gate{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#0a0d13,#111827);font-family:inherit}
-  .gate-box{width:min(92vw,340px);background:#fff;color:#111;border-radius:16px;padding:28px 24px;box-shadow:0 20px 60px rgba(0,0,0,.4);text-align:center}
+  .gate{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto;background:linear-gradient(160deg,#0a0d13,#111827);font-family:inherit}
+  .gate-box{width:min(92vw,340px);max-height:calc(100vh - 32px);overflow:auto;background:#fff;color:#111;border-radius:16px;padding:28px 24px;box-shadow:0 20px 60px rgba(0,0,0,.4);text-align:center}
   [data-theme="dark"] .gate-box{background:#161b22;color:#e6edf3}
   .gate-brand{font-size:22px;font-weight:800;color:#2563eb;margin-bottom:4px}
   .gate-sub{font-size:13px;color:#64748b;margin:0 0 18px}
@@ -29,8 +29,8 @@
   <div class="gate-box">
     <div class="gate-brand">Pulsedeck</div>
     <p class="gate-sub">个人资讯聚合站点 · 请输入访问密码</p>
-    <input class="gate-input" id="gateUser" type="text" placeholder="用户名" autocomplete="username" />
-    <input class="gate-input" id="gatePwd" type="password" placeholder="密码" autocomplete="current-password" />
+    <input class="gate-input" id="gateUser" type="text" value="admin" autocomplete="username" />
+    <input class="gate-input" id="gatePwd" type="password" value="admin123" autocomplete="current-password" />
     <button class="gate-btn" id="gateBtn">进入</button>
     <p class="gate-err" id="gateErr" hidden></p>
     <p class="gate-note">本站为个人非商用项目，内容来自公开 RSS 源，版权归原作者所有。</p>

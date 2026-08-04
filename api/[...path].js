@@ -780,6 +780,65 @@ ${it.summary || ""}`.slice(0, SRC_MAX).trim();
   };
 }
 
+// shared/auth.js
+var SESSIONS = /* @__PURE__ */ new Map();
+var MAX_SESSIONS = 3;
+var SESSION_TTL = 7 * 24 * 60 * 60 * 1e3;
+function creds() {
+  const env = typeof process !== "undefined" && process.env || {};
+  return {
+    user: env.SITE_USER || "admin",
+    pass: env.SITE_PASS || "admin123"
+  };
+}
+function genToken() {
+  try {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+      const a = crypto.getRandomValues(new Uint8Array(16));
+      return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+    }
+  } catch {
+  }
+  return "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+function prune() {
+  const now = Date.now();
+  for (const [t, s] of SESSIONS) {
+    if (now - s.createdAt > SESSION_TTL) SESSIONS.delete(t);
+  }
+  while (SESSIONS.size >= MAX_SESSIONS) {
+    let oldest = null;
+    for (const [t, s] of SESSIONS) {
+      if (!oldest || s.createdAt < oldest[1].createdAt) oldest = [t, s];
+    }
+    if (!oldest) break;
+    SESSIONS.delete(oldest[0]);
+  }
+}
+function login(user, pass) {
+  const c = creds();
+  if (user !== c.user || pass !== c.pass) return null;
+  prune();
+  const token = genToken();
+  SESSIONS.set(token, { createdAt: Date.now(), lastSeen: Date.now() });
+  return token;
+}
+function check(token) {
+  if (!token) return false;
+  const s = SESSIONS.get(token);
+  if (!s) return false;
+  if (Date.now() - s.createdAt > SESSION_TTL) {
+    SESSIONS.delete(token);
+    return false;
+  }
+  s.lastSeen = Date.now();
+  return true;
+}
+function sessionCount() {
+  return SESSIONS.size;
+}
+
 // shared/escape.js
 function escapeXml(str = "") {
   return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
@@ -1282,6 +1341,20 @@ function readNodeBody(req) {
     req.on("error", () => resolve(""));
   });
 }
+function getHeader(req, isNode, name) {
+  if (isNode) return req && req.headers && req.headers[name.toLowerCase()] || "";
+  try {
+    return req && req.headers && req.headers.get(name) || "";
+  } catch {
+    return "";
+  }
+}
+function requireAuth(route, token) {
+  const PUBLIC = /* @__PURE__ */ new Set(["health", "auth", "img", "translate"]);
+  if (PUBLIC.has(route)) return null;
+  if (token && check(token)) return null;
+  return json({ ok: false, error: "unauthorized" }, 401);
+}
 async function handler(req, res) {
   const isNode = !!(res && typeof res.end === "function");
   let pathname, searchParams, method, bodyText = "";
@@ -1297,38 +1370,59 @@ async function handler(req, res) {
     method = req.method || "GET";
   }
   const route = pathname.replace(/^\/api\//, "").split("/")[0];
+  const authToken = (getHeader(req, isNode, "authorization").replace(/^Bearer\s+/i, "") || searchParams.get("token") || "").trim();
   let result;
   let cacheNews = false;
   try {
-    switch (route) {
-      case "news":
-        result = await server.handleNews(searchParams);
-        cacheNews = searchParams.get("fresh") !== "1";
-        if (cacheNews) result.headers.set("Cache-Control", "public, s-maxage=300, stale-while-revalidate=600");
-        break;
-      case "feeds":
-        result = await server.handleFeeds();
-        break;
-      case "config":
-        result = await server.handleConfig();
-        break;
-      case "translate":
-        if (method === "OPTIONS") {
-          result = new Response(null, { status: 204, headers: CORS });
+    const guard = requireAuth(route, authToken);
+    if (guard) {
+      result = guard;
+    } else {
+      switch (route) {
+        case "news":
+          result = await server.handleNews(searchParams);
+          cacheNews = searchParams.get("fresh") !== "1";
+          if (cacheNews) result.headers.set("Cache-Control", "public, s-maxage=300, stale-while-revalidate=600");
           break;
-        }
-        if (isNode) bodyText = await readNodeBody(req);
-        else bodyText = await req.text().catch(() => "");
-        result = await server.handleTranslate({ json: async () => JSON.parse(bodyText || "{}"), method });
-        break;
-      case "img":
-        result = await server.handleImg(searchParams);
-        break;
-      case "health":
-        result = server.handleHealth();
-        break;
-      default:
-        result = json({ ok: false, error: `unknown route: ${pathname}` }, 404);
+        case "feeds":
+          result = await server.handleFeeds();
+          break;
+        case "config":
+          result = await server.handleConfig();
+          break;
+        case "translate":
+          if (method === "OPTIONS") {
+            result = new Response(null, { status: 204, headers: CORS });
+            break;
+          }
+          if (isNode) bodyText = await readNodeBody(req);
+          else bodyText = await req.text().catch(() => "");
+          result = await server.handleTranslate({ json: async () => JSON.parse(bodyText || "{}"), method });
+          break;
+        case "img":
+          result = await server.handleImg(searchParams);
+          break;
+        case "auth":
+          if (method === "POST") {
+            if (isNode) bodyText = await readNodeBody(req);
+            else bodyText = await req.text().catch(() => "");
+            let b = {};
+            try {
+              b = JSON.parse(bodyText || "{}");
+            } catch {
+            }
+            const token = login(String(b.user || ""), String(b.pass || ""));
+            result = token ? json({ ok: true, token, count: sessionCount() }, 200) : json({ ok: false, error: "invalid credentials" }, 401);
+          } else {
+            result = json({ ok: check(authToken), count: sessionCount() });
+          }
+          break;
+        case "health":
+          result = server.handleHealth();
+          break;
+        default:
+          result = json({ ok: false, error: `unknown route: ${pathname}` }, 404);
+      }
     }
   } catch (e) {
     result = json(

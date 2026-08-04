@@ -20,6 +20,7 @@ import { aggregate } from '../shared/aggregate.js';
 import { aggregateCommunity } from '../shared/community.js';
 import { makeTranslator } from '../shared/translate.js';
 import { makeSummarizer } from '../shared/summarize.js';
+import { login as authLogin, check as authCheck, sessionCount } from '../shared/auth.js';
 import { buildSampleData } from '../shared/sample-data.js';
 import { placeholderSVG } from '../shared/placeholder.js';
 import { escapeXml } from '../shared/escape.js';
@@ -161,6 +162,14 @@ function getHeader(req, isNode, name) {
   }
 }
 
+// 会话守卫：受保护路由必须携带有效 token；公开路由直接放行。
+function requireAuth(route, token) {
+  const PUBLIC = new Set(['health', 'auth', 'img', 'translate']);
+  if (PUBLIC.has(route)) return null;
+  if (token && authCheck(token)) return null;
+  return json({ ok: false, error: 'unauthorized' }, 401);
+}
+
 export default async function handler(req, res) {
   const isNode = !!(res && typeof res.end === 'function');
 
@@ -179,9 +188,14 @@ export default async function handler(req, res) {
   }
 
   const route = pathname.replace(/^\/api\//, '').split('/')[0];
+  const authToken = (getHeader(req, isNode, 'authorization').replace(/^Bearer\s+/i, '') || searchParams.get('token') || '').trim();
   let result;
   let cacheNews = false;
   try {
+    const guard = requireAuth(route, authToken);
+    if (guard) {
+      result = guard;
+    } else {
     switch (route) {
       case 'news':
         result = await server.handleNews(searchParams);
@@ -209,11 +223,26 @@ export default async function handler(req, res) {
       case 'img':
         result = await server.handleImg(searchParams);
         break;
+      case 'auth':
+        if (method === 'POST') {
+          if (isNode) bodyText = await readNodeBody(req);
+          else bodyText = await req.text().catch(() => '');
+          let b = {};
+          try { b = JSON.parse(bodyText || '{}'); } catch { /* ignore */ }
+          const token = authLogin(String(b.user || ''), String(b.pass || ''));
+          result = token
+            ? json({ ok: true, token, count: sessionCount() }, 200)
+            : json({ ok: false, error: 'invalid credentials' }, 401);
+        } else {
+          result = json({ ok: authCheck(authToken), count: sessionCount() });
+        }
+        break;
       case 'health':
         result = server.handleHealth();
         break;
       default:
         result = json({ ok: false, error: `unknown route: ${pathname}` }, 404);
+    }
     }
   } catch (e) {
     result = json(
