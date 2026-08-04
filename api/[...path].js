@@ -1192,7 +1192,7 @@ var server = {
       const data2 = buildSampleData();
       return json(data2);
     }
-    const data = await aggregate({});
+    const data = await aggregate(FEEDS);
     return json(data);
   },
   async handleFeeds() {

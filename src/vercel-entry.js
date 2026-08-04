@@ -62,7 +62,7 @@ const server = {
       const data = buildSampleData();
       return json(data);
     }
-    const data = await aggregate({});
+    const data = await aggregate(FEEDS);
     return json(data);
   },
 
