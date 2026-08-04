@@ -207,7 +207,7 @@ function imgSrc(item, i = 0) {
   let src = item.image;
   if (!src) {
     const p = new URLSearchParams({ i: String(i), t: item.title.slice(0, 46), s: item.source });
-    return `${API_BASE}/api/placeholder?${p}`;
+    return `${API_BASE}/api/img?${p}`;
   }
   if (src.startsWith('/api/')) return `${API_BASE}${src}`;
   if (state.prefs.proxy && /^https?:\/\//i.test(src)) {
@@ -242,14 +242,15 @@ async function translateText(text, pair) {
   if (!src) return '';
   const key = `${pair}::${src}`;
   if (trCache.has(key)) return trCache.get(key);
-  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(src.slice(0, 480))}&langpair=${pair}`;
+  // 改走同源 /api/translate（Vercel 函数代理 MyMemory），避免浏览器直连被墙/CORS
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined });
-    if (!res.ok) { trCache.set(key, ''); return ''; }
+    const res = await fetch(`${API_BASE}/api/translate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: src.slice(0, 480), pair }),
+    });
     const j = await res.json();
-    const t = j?.responseData?.translatedText || '';
-    if (/MYMEMORY WARNING/i.test(t)) { trCache.set(key, ''); return ''; } // 免费额度耗尽
-    const out = String(t).trim();
+    const out = j && j.ok ? String(j.text || '').trim() : '';
     trCache.set(key, out);
     return out;
   } catch {
@@ -786,7 +787,7 @@ function openItem(id) {
   }
 
   el.modalCard.innerHTML = `
-    ${state.prefs.images ? `<img class="modal-hero" src="${esc(imgSrc(it, 0))}" alt="" onerror="this.style.display='none'" />` : ''}
+    ${state.prefs.images ? `<img class="modal-hero" src="${esc(imgSrc(it, 0))}" alt="" loading="lazy" decoding="async" onerror="this.style.display='none'" />` : ''}
     <div class="modal-body">
       <div class="meta">
         <span class="src">${esc(it.source)}</span><span class="sep">·</span>
@@ -1066,7 +1067,7 @@ async function loadFeeds({ fresh = false } = {}) {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 30000);
   try {
-    const res = await fetch(`${API_BASE}/api/feeds?${params}`, { signal: ctrl.signal });
+    const res = await fetch(`${API_BASE}/api/news?community=1&${params}`, { signal: ctrl.signal });
     if (!res.ok) throw new Error('接口返回 ' + res.status);
     const data = await res.json();
     state.data = { note: '', ...data };
@@ -1378,4 +1379,30 @@ async function boot() {
   }
 }
 
-boot();
+/* ------------------------- 登录门（个人网站访问控制） ------------------------- */
+const GATE_USER = 'admin';
+const GATE_PASS = 'admin123';
+function tryGate() {
+  const gate = document.getElementById('gate');
+  if (sessionStorage.getItem('pd_gate') === '1') { gate && gate.remove(); boot(); return; }
+  if (!gate) { boot(); return; }
+  const u = gate.querySelector('#gateUser');
+  const p = gate.querySelector('#gatePwd');
+  const err = gate.querySelector('#gateErr');
+  const submit = () => {
+    if (u.value === GATE_USER && p.value === GATE_PASS) {
+      sessionStorage.setItem('pd_gate', '1');
+      gate.remove();
+      boot();
+    } else {
+      err.textContent = '用户名或密码错误';
+      err.hidden = false;
+      p.value = '';
+      p.focus();
+    }
+  };
+  gate.querySelector('#gateBtn').addEventListener('click', submit);
+  p.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  u.focus();
+}
+tryGate();

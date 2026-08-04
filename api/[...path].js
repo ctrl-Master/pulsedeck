@@ -1185,7 +1185,7 @@ var server = {
     const demo = params.get("demo") === "1" || params.get("demo") === "true";
     const community = params.get("community") === "1" || params.get("community") === "true";
     if (community) {
-      const data2 = await aggregateCommunity({ demo });
+      const data2 = await aggregateCommunity({ demo, fresh: searchParams.get("fresh") === "1" });
       return json(data2);
     }
     if (demo) {
@@ -1223,12 +1223,19 @@ var server = {
     try {
       const body = await req.json().catch(() => ({}));
       const text = String(body.text || "").slice(0, 5e3);
-      const to = String(body.to || "zh").slice(0, 3);
+      const from = String(body.from || "en").slice(0, 8);
+      const to = String(body.to || "zh-CN").slice(0, 8);
+      const pair = `${from}|${to === "zh" ? "zh-CN" : to}`;
       if (!text) return json({ ok: false, error: "empty text" }, 400);
-      const out = await TRANSLATOR.translate(text, to);
-      return json({ ok: true, text: out, to });
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 480))}&langpair=${encodeURIComponent(pair)}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout ? AbortSignal.timeout(6e3) : void 0 });
+      if (!r.ok) return json({ ok: false, error: "translate upstream " + r.status }, 502);
+      const j = await r.json();
+      const t = j?.responseData?.translatedText || "";
+      if (/MYMEMORY WARNING/i.test(t)) return json({ ok: true, text: "" });
+      return json({ ok: true, text: String(t).trim() });
     } catch (e) {
-      return json({ ok: false, error: String(e && e.message || e) }, 500);
+      return json({ ok: true, text: "" });
     }
   },
   async handleImg(params) {
@@ -1262,16 +1269,16 @@ function readNodeBody(req) {
 }
 async function handler(req, res) {
   const isNode = !!(res && typeof res.end === "function");
-  let pathname, searchParams, method, bodyText = "";
+  let pathname, searchParams2, method, bodyText = "";
   if (isNode) {
     const u = new URL(req.url || "/", "http://localhost");
     pathname = u.pathname;
-    searchParams = u.searchParams;
+    searchParams2 = u.searchParams;
     method = req.method || "GET";
   } else {
     const u = safeUrl(req);
     pathname = u.pathname;
-    searchParams = u.searchParams;
+    searchParams2 = u.searchParams;
     method = req.method || "GET";
   }
   const route = pathname.replace(/^\/api\//, "").split("/")[0];
@@ -1279,7 +1286,10 @@ async function handler(req, res) {
   try {
     switch (route) {
       case "news":
-        result = await server.handleNews(searchParams);
+        result = await server.handleNews(searchParams2);
+        if (searchParams2.get("fresh") !== "1") {
+          result.headers.set("Cache-Control", "public, s-maxage=300, stale-while-revalidate=600");
+        }
         break;
       case "feeds":
         result = await server.handleFeeds();
@@ -1297,7 +1307,7 @@ async function handler(req, res) {
         result = await server.handleTranslate({ json: async () => JSON.parse(bodyText || "{}"), method });
         break;
       case "img":
-        result = await server.handleImg(searchParams);
+        result = await server.handleImg(searchParams2);
         break;
       case "health":
         result = server.handleHealth();

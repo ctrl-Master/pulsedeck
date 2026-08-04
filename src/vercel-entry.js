@@ -55,7 +55,7 @@ const server = {
     const demo = params.get('demo') === '1' || params.get('demo') === 'true';
     const community = params.get('community') === '1' || params.get('community') === 'true';
     if (community) {
-      const data = await aggregateCommunity({ demo });
+      const data = await aggregateCommunity({ demo, fresh: searchParams.get('fresh') === '1' });
       return json(data);
     }
     if (demo) {
@@ -96,12 +96,22 @@ const server = {
     try {
       const body = await req.json().catch(() => ({}));
       const text = String(body.text || '').slice(0, 5000);
-      const to = String(body.to || 'zh').slice(0, 3);
+      const from = String(body.from || 'en').slice(0, 8);
+      const to = String(body.to || 'zh-CN').slice(0, 8);
+      const pair = `${from}|${to === 'zh' ? 'zh-CN' : to}`;
       if (!text) return json({ ok: false, error: 'empty text' }, 400);
-      const out = await TRANSLATOR.translate(text, to);
-      return json({ ok: true, text: out, to });
+      // 同源代理：浏览器只与 Vercel 通信（国内可达），由海外函数实例调 MyMemory，
+      // 绕过「浏览器直连 api.mymemory.translated.net 在国内被墙/CORS」的问题。
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 480))}&langpair=${encodeURIComponent(pair)}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout ? AbortSignal.timeout(6000) : undefined });
+      if (!r.ok) return json({ ok: false, error: 'translate upstream ' + r.status }, 502);
+      const j = await r.json();
+      const t = j?.responseData?.translatedText || '';
+      if (/MYMEMORY WARNING/i.test(t)) return json({ ok: true, text: '' });
+      return json({ ok: true, text: String(t).trim() });
     } catch (e) {
-      return json({ ok: false, error: String(e && e.message || e) }, 500);
+      // 翻译失败不应阻断阅读，回退原文（前端会显示原始标题）
+      return json({ ok: true, text: '' });
     }
   },
 
@@ -163,6 +173,11 @@ export default async function handler(req, res) {
     switch (route) {
       case 'news':
         result = await server.handleNews(searchParams);
+        // 边缘缓存：非强制刷新时让 Vercel CDN 缓存 5 分钟，二次/多人访问秒回，
+        // 大幅缓解「每次实时抓 33 个 RSS 源」带来的首屏慢。
+        if (searchParams.get('fresh') !== '1') {
+          result.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+        }
         break;
       case 'feeds':
         result = await server.handleFeeds();
