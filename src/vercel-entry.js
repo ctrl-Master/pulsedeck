@@ -55,7 +55,7 @@ const server = {
     const demo = params.get('demo') === '1' || params.get('demo') === 'true';
     const community = params.get('community') === '1' || params.get('community') === 'true';
     if (community) {
-      const data = await aggregateCommunity({ demo, fresh: searchParams.get('fresh') === '1' });
+      const data = await aggregateCommunity({ demo, fresh: params.get('fresh') === '1' });
       return json(data);
     }
     if (demo) {

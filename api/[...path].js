@@ -1185,7 +1185,7 @@ var server = {
     const demo = params.get("demo") === "1" || params.get("demo") === "true";
     const community = params.get("community") === "1" || params.get("community") === "true";
     if (community) {
-      const data2 = await aggregateCommunity({ demo, fresh: searchParams.get("fresh") === "1" });
+      const data2 = await aggregateCommunity({ demo, fresh: params.get("fresh") === "1" });
       return json(data2);
     }
     if (demo) {
@@ -1269,16 +1269,16 @@ function readNodeBody(req) {
 }
 async function handler(req, res) {
   const isNode = !!(res && typeof res.end === "function");
-  let pathname, searchParams2, method, bodyText = "";
+  let pathname, searchParams, method, bodyText = "";
   if (isNode) {
     const u = new URL(req.url || "/", "http://localhost");
     pathname = u.pathname;
-    searchParams2 = u.searchParams;
+    searchParams = u.searchParams;
     method = req.method || "GET";
   } else {
     const u = safeUrl(req);
     pathname = u.pathname;
-    searchParams2 = u.searchParams;
+    searchParams = u.searchParams;
     method = req.method || "GET";
   }
   const route = pathname.replace(/^\/api\//, "").split("/")[0];
@@ -1286,8 +1286,8 @@ async function handler(req, res) {
   try {
     switch (route) {
       case "news":
-        result = await server.handleNews(searchParams2);
-        if (searchParams2.get("fresh") !== "1") {
+        result = await server.handleNews(searchParams);
+        if (searchParams.get("fresh") !== "1") {
           result.headers.set("Cache-Control", "public, s-maxage=300, stale-while-revalidate=600");
         }
         break;
@@ -1307,7 +1307,7 @@ async function handler(req, res) {
         result = await server.handleTranslate({ json: async () => JSON.parse(bodyText || "{}"), method });
         break;
       case "img":
-        result = await server.handleImg(searchParams2);
+        result = await server.handleImg(searchParams);
         break;
       case "health":
         result = server.handleHealth();
