@@ -230,12 +230,14 @@ function normalize(it) {
 
 /* ------------------------------ 聚合入口 ------------------------------ */
 
-export async function aggregateCommunity({ fresh = false } = {}) {
-  const cacheKey = new Request('https://pulsedeck.cache/community');
-  const cache = caches.default;
+// Vercel Node 运行时无全局 caches（那是 Edge/Worker 的 Cache API），用内存 Map 回退
+const memCache = new Map();
+const EDGE_CACHE = (typeof caches !== 'undefined' && caches && caches.default) ? caches.default : null;
 
-  if (!fresh) {
-    const cached = await cache.match(cacheKey);
+export async function aggregateCommunity({ fresh = false } = {}) {
+  const CACHE_KEY = 'community';
+  if (!fresh && EDGE_CACHE) {
+    const cached = await EDGE_CACHE.match(new Request('https://pulsedeck.cache/community'));
     if (cached) {
       const body = await cached.text();
       if (body) {
@@ -246,6 +248,9 @@ export async function aggregateCommunity({ fresh = false } = {}) {
         }
       }
     }
+  } else if (!fresh && memCache.has(CACHE_KEY)) {
+    const e = memCache.get(CACHE_KEY);
+    if (Date.now() - e.t < COMMUNITY_CACHE_SECONDS * 1000) return e.data;
   }
 
   const results = await Promise.allSettled(
@@ -289,18 +294,22 @@ export async function aggregateCommunity({ fresh = false } = {}) {
 
   // 缓冲成字符串再写缓存：规避 edge 上 clone() 共享流写入空体的竞态
   const bodyText = JSON.stringify(out);
-  try {
-    await cache.put(
-      cacheKey,
-      new Response(bodyText, {
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          'Cache-Control': `public, max-age=${COMMUNITY_CACHE_SECONDS}`,
-        },
-      })
-    );
-  } catch {
-    /* 缓存失败不致命 */
+  if (EDGE_CACHE) {
+    try {
+      await EDGE_CACHE.put(
+        new Request('https://pulsedeck.cache/community'),
+        new Response(bodyText, {
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': `public, max-age=${COMMUNITY_CACHE_SECONDS}`,
+          },
+        })
+      );
+    } catch {
+      /* 缓存失败不致命 */
+    }
+  } else {
+    memCache.set(CACHE_KEY, { t: Date.now(), data: out });
   }
   return out;
 }

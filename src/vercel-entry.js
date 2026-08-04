@@ -169,15 +169,16 @@ export default async function handler(req, res) {
 
   const route = pathname.replace(/^\/api\//, '').split('/')[0];
   let result;
+  let cacheNews = false;
   try {
     switch (route) {
       case 'news':
         result = await server.handleNews(searchParams);
         // 边缘缓存：非强制刷新时让 Vercel CDN 缓存 5 分钟，二次/多人访问秒回，
         // 大幅缓解「每次实时抓 33 个 RSS 源」带来的首屏慢。
-        if (searchParams.get('fresh') !== '1') {
-          result.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
-        }
+        cacheNews = searchParams.get('fresh') !== '1';
+        // Edge(Web Response) 直接写在 response 头上；Node 模式在下方对 res 直接 setHeader 才可靠
+        if (cacheNews) result.headers.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
         break;
       case 'feeds':
         result = await server.handleFeeds();
@@ -214,6 +215,8 @@ export default async function handler(req, res) {
     const body = await result.text();
     res.statusCode = result.status;
     result.headers.forEach((value, key) => res.setHeader(key, value));
+    // Node 模式必须直接对 res 设置，result.headers.set 不会透传
+    if (cacheNews) res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
     res.end(Buffer.from(body));
   } else {
     return result;

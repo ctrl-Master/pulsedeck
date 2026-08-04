@@ -582,11 +582,12 @@ function normalize(it) {
     summaryZh: ""
   };
 }
+var memCache = /* @__PURE__ */ new Map();
+var EDGE_CACHE = typeof caches !== "undefined" && caches && caches.default ? caches.default : null;
 async function aggregateCommunity({ fresh = false } = {}) {
-  const cacheKey = new Request("https://pulsedeck.cache/community");
-  const cache = caches.default;
-  if (!fresh) {
-    const cached = await cache.match(cacheKey);
+  const CACHE_KEY = "community";
+  if (!fresh && EDGE_CACHE) {
+    const cached = await EDGE_CACHE.match(new Request("https://pulsedeck.cache/community"));
     if (cached) {
       const body = await cached.text();
       if (body) {
@@ -596,6 +597,9 @@ async function aggregateCommunity({ fresh = false } = {}) {
         }
       }
     }
+  } else if (!fresh && memCache.has(CACHE_KEY)) {
+    const e = memCache.get(CACHE_KEY);
+    if (Date.now() - e.t < COMMUNITY_CACHE_SECONDS * 1e3) return e.data;
   }
   const results = await Promise.allSettled(
     COMMUNITY_FEEDS.map((f) => fetchFeed(f, FEED_TIMEOUT))
@@ -627,17 +631,21 @@ async function aggregateCommunity({ fresh = false } = {}) {
     items: top.map(normalize)
   };
   const bodyText = JSON.stringify(out);
-  try {
-    await cache.put(
-      cacheKey,
-      new Response(bodyText, {
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          "Cache-Control": `public, max-age=${COMMUNITY_CACHE_SECONDS}`
-        }
-      })
-    );
-  } catch {
+  if (EDGE_CACHE) {
+    try {
+      await EDGE_CACHE.put(
+        new Request("https://pulsedeck.cache/community"),
+        new Response(bodyText, {
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": `public, max-age=${COMMUNITY_CACHE_SECONDS}`
+          }
+        })
+      );
+    } catch {
+    }
+  } else {
+    memCache.set(CACHE_KEY, { t: Date.now(), data: out });
   }
   return out;
 }
@@ -1283,13 +1291,13 @@ async function handler(req, res) {
   }
   const route = pathname.replace(/^\/api\//, "").split("/")[0];
   let result;
+  let cacheNews = false;
   try {
     switch (route) {
       case "news":
         result = await server.handleNews(searchParams);
-        if (searchParams.get("fresh") !== "1") {
-          result.headers.set("Cache-Control", "public, s-maxage=300, stale-while-revalidate=600");
-        }
+        cacheNews = searchParams.get("fresh") !== "1";
+        if (cacheNews) result.headers.set("Cache-Control", "public, s-maxage=300, stale-while-revalidate=600");
         break;
       case "feeds":
         result = await server.handleFeeds();
@@ -1325,6 +1333,7 @@ async function handler(req, res) {
     const body = await result.text();
     res.statusCode = result.status;
     result.headers.forEach((value, key) => res.setHeader(key, value));
+    if (cacheNews) res.setHeader("Cache-Control", "public, s-maxage=300, stale-while-revalidate=600");
     res.end(Buffer.from(body));
   } else {
     return result;
