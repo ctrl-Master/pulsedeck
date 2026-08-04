@@ -1557,24 +1557,51 @@ function showGate(reAuth) {
   gate.style.display = '';
   const err = gate.querySelector('#gateErr');
   if (err) { err.hidden = true; err.textContent = ''; }
-  const pwd = gate.querySelector('#gatePwd');
-  pwd && pwd.focus();
+  const userEl = gate.querySelector('#gateUser');
+  const pwdEl = gate.querySelector('#gatePwd');
+  if (pwdEl) pwdEl.focus();
+
+  let autoTimer = null;
+  let submitting = false;
   const submit = async () => {
-    const u = (gate.querySelector('#gateUser').value || '').trim();
-    const pw = gate.querySelector('#gatePwd').value || '';
-    const token = await authLoginRemote(u, pw);
-    if (token) {
-      setToken(token);
-      gate.hidden = true; gate.style.display = 'none';
-      stopAuthPoll(); startAuthPoll();
-      boot();
-    } else {
-      if (err) { err.textContent = '用户名或密码错误'; err.hidden = false; }
-      const p = gate.querySelector('#gatePwd'); if (p) p.value = '';
+    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    if (submitting) return; // 防重复提交 / 重复渲染
+    submitting = true;
+    try {
+      const u = (userEl && userEl.value || '').trim();
+      const pw = (pwdEl && pwdEl.value) || '';
+      const token = await authLoginRemote(u, pw);
+      if (token) {
+        setToken(token);
+        gate.hidden = true; gate.style.display = 'none';
+        stopAuthPoll(); startAuthPoll();
+        boot();
+      } else {
+        if (err) { err.textContent = '用户名或密码错误'; err.hidden = false; }
+        if (pwdEl) pwdEl.value = '';
+      }
+    } finally {
+      submitting = false;
     }
   };
+
+  // 输入即自动登录：账号 + 密码都非空时，停顿 600ms 无新输入即自动提交（无需点击按钮）
+  const maybeAuto = () => {
+    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    const u = (userEl && userEl.value || '').trim();
+    const pw = (pwdEl && pwdEl.value) || '';
+    if (u && pw) autoTimer = setTimeout(submit, 600);
+  };
+  if (userEl) userEl.oninput = maybeAuto;
+  if (pwdEl) pwdEl.oninput = maybeAuto;
+
   const btn = gate.querySelector('#gateBtn'); if (btn) btn.onclick = submit;
-  if (pwd) pwd.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+  if (pwdEl) pwdEl.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+
+  // 首屏若已预填（默认 admin/admin123），直接尝试自动登录，几乎无感进入
+  if ((userEl && userEl.value || '').trim() && (pwdEl && pwdEl.value || '')) {
+    autoTimer = setTimeout(submit, 400);
+  }
 }
 
 async function startApp() {

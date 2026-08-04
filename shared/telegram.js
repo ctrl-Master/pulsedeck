@@ -324,9 +324,7 @@ export async function aggregateTelegram({ fresh = false } = {}) {
     note:
       merged.length === 0
         ? '本次未抓取到任何 Telegram 内容，可能是 t.me/s 预览页临时不可达或频道被限制，请稍后重试（可检查 TG_WEB_BASE_URL）。'
-        : useLLM
-        ? ''
-        : '未配置 DEEPSEEK_API_KEY，已使用原文摘要（未启用 AI 审验/总结）。',
+        : '',
   };
 
   CACHE.set(CACHE_KEY, { ts: Date.now(), data });

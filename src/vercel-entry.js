@@ -223,20 +223,26 @@ export default async function handler(req, res) {
       case 'img':
         result = await server.handleImg(searchParams);
         break;
-      case 'auth':
+      case 'auth': {
+        // 客户端 IP（用于 IP 检校 / 去重）：优先 x-forwarded-for 首段，回退 socket 地址
+        const ip =
+          (getHeader(req, isNode, 'x-forwarded-for').split(',')[0] || '').trim() ||
+          (isNode && req.socket && req.socket.remoteAddress) ||
+          '';
         if (method === 'POST') {
           if (isNode) bodyText = await readNodeBody(req);
           else bodyText = await req.text().catch(() => '');
           let b = {};
           try { b = JSON.parse(bodyText || '{}'); } catch { /* ignore */ }
-          const token = authLogin(String(b.user || ''), String(b.pass || ''));
+          const token = authLogin(String(b.user || ''), String(b.pass || ''), ip);
           result = token
             ? json({ ok: true, token, count: sessionCount() }, 200)
             : json({ ok: false, error: 'invalid credentials' }, 401);
         } else {
-          result = json({ ok: authCheck(authToken), count: sessionCount() });
+          result = json({ ok: authCheck(authToken, ip), count: sessionCount() });
         }
         break;
+      }
       case 'health':
         result = server.handleHealth();
         break;

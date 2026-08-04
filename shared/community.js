@@ -17,12 +17,20 @@
 
 import { cleanText, decodeEntities, tagText, linkOf, attrOf } from './xml.js';
 
+function getEnv(name, fallback = '') {
+  if (typeof process !== 'undefined' && process.env && process.env[name]) return process.env[name];
+  return fallback;
+}
+
 /* RSSHub 公共镜像（按需增删；任一 403/超时即被 Promise.any 跳过）。
-   注意：公共实例可用性会变化，可自行补充已知可用的镜像。 */
-const RSSHUB_HOSTS = [
-  'https://rsshub.app',
-  'https://rsshub.rssforever.com',
-];
+   注意：公共实例（尤其 rsshub.app）对数据中心 IP 常返回 403；可用环境变量
+   COMMUNITY_RSSHUB_HOSTS 覆盖（逗号分隔），例如指向你自建的 RSSHub 实例，
+   即可彻底摆脱 403。重要：知乎 / 虎扑 / 贴吧等社区没有官方公开 RSS，
+   RSSHub 是唯一的聚合桥接层（不像 Telegram 有 t.me/s 原生预览页可直抓源站）。 */
+const RSSHUB_HOSTS = (getEnv('COMMUNITY_RSSHUB_HOSTS') || 'https://rsshub.app,https://rsshub.rssforever.com')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 /* 社区源定义。
    - rsshub：RSSHub 路径（走多镜像竞速）
