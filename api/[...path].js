@@ -425,10 +425,11 @@ async function aggregate(feeds, opts = {}) {
 }
 
 // shared/community.js
-var RSSHUB_HOSTS = [
-  "https://rsshub.app",
-  "https://rsshub.rssforever.com"
-];
+function getEnv(name, fallback = "") {
+  if (typeof process !== "undefined" && process.env && process.env[name]) return process.env[name];
+  return fallback;
+}
+var RSSHUB_HOSTS = (getEnv("COMMUNITY_RSSHUB_HOSTS") || "https://rsshub.app,https://rsshub.rssforever.com").split(",").map((s) => s.trim()).filter(Boolean);
 var COMMUNITY_FEEDS = [
   { id: "zhihu-hot", name: "\u77E5\u4E4E\u70ED\u699C", cat: "zhihu", lang: "zh", rsshub: "/zhihu/hot" },
   { id: "zhihu-daily", name: "\u77E5\u4E4E\u65E5\u62A5", cat: "zhihu", lang: "zh", rsshub: "/zhihu/daily" },
@@ -781,6 +782,7 @@ ${it.summary || ""}`.slice(0, SRC_MAX).trim();
 }
 
 // shared/auth.js
+import crypto from "node:crypto";
 var SESSIONS = /* @__PURE__ */ new Map();
 var MAX_SESSIONS = 3;
 var SESSION_TTL = 7 * 24 * 60 * 60 * 1e3;
@@ -791,16 +793,33 @@ function creds() {
     pass: env.SITE_PASS || "admin123"
   };
 }
-function genToken() {
+function secret() {
+  const env = typeof process !== "undefined" && process.env || {};
+  return env.AUTH_SECRET || "pd-" + (env.SITE_PASS || "admin123");
+}
+function b64url(s) {
+  return Buffer.from(s).toString("base64url");
+}
+function sign(payloadB64) {
+  return crypto.createHmac("sha256", secret()).update(payloadB64).digest("base64url");
+}
+function makeToken(user, ip) {
+  const payload = { u: user, ip, iat: Date.now(), exp: Date.now() + SESSION_TTL };
+  const p = b64url(JSON.stringify(payload));
+  return p + "." + sign(p);
+}
+function verifyToken(token) {
+  if (!token || typeof token !== "string" || token.indexOf(".") < 0) return null;
+  const [p, s] = token.split(".");
+  if (!p || !s) return null;
   try {
-    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-      const a = crypto.getRandomValues(new Uint8Array(16));
-      return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
-    }
+    if (sign(p) !== s) return null;
+    const payload = JSON.parse(Buffer.from(p, "base64url").toString());
+    if (!payload || payload.exp && Date.now() > payload.exp) return null;
+    return payload;
   } catch {
+    return null;
   }
-  return "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
 function prune() {
   const now = Date.now();
@@ -808,31 +827,58 @@ function prune() {
     if (now - s.createdAt > SESSION_TTL) SESSIONS.delete(t);
   }
   while (SESSIONS.size >= MAX_SESSIONS) {
-    let oldest = null;
+    let oldestT = null;
+    let oldestAt = Infinity;
     for (const [t, s] of SESSIONS) {
-      if (!oldest || s.createdAt < oldest[1].createdAt) oldest = [t, s];
+      if (s.createdAt < oldestAt) {
+        oldestAt = s.createdAt;
+        oldestT = t;
+      }
     }
-    if (!oldest) break;
-    SESSIONS.delete(oldest[0]);
+    if (!oldestT) break;
+    SESSIONS.delete(oldestT);
   }
 }
-function login(user, pass) {
+function findSessionByIp(ip) {
+  const now = Date.now();
+  for (const [t, s] of SESSIONS) {
+    if (s.ip === ip && now - s.createdAt < SESSION_TTL) return t;
+  }
+  return null;
+}
+function login(user, pass, ip = "") {
   const c = creds();
   if (user !== c.user || pass !== c.pass) return null;
+  const existing = findSessionByIp(ip);
+  if (existing) {
+    const s = SESSIONS.get(existing);
+    if (s) {
+      s.lastSeen = Date.now();
+      s.createdAt = Math.min(s.createdAt, Date.now());
+    }
+    return existing;
+  }
   prune();
-  const token = genToken();
-  SESSIONS.set(token, { createdAt: Date.now(), lastSeen: Date.now() });
+  if (SESSIONS.size >= MAX_SESSIONS) {
+    let oldestT = null;
+    let oldestAt = Infinity;
+    for (const [t, s] of SESSIONS) {
+      if (s.createdAt < oldestAt) {
+        oldestAt = s.createdAt;
+        oldestT = t;
+      }
+    }
+    if (oldestT) SESSIONS.delete(oldestT);
+  }
+  const token = makeToken(user, ip);
+  SESSIONS.set(token, { createdAt: Date.now(), lastSeen: Date.now(), ip, user });
   return token;
 }
-function check(token) {
-  if (!token) return false;
+function check(token, _ip) {
+  const payload = verifyToken(token);
+  if (!payload) return false;
   const s = SESSIONS.get(token);
-  if (!s) return false;
-  if (Date.now() - s.createdAt > SESSION_TTL) {
-    SESSIONS.delete(token);
-    return false;
-  }
-  s.lastSeen = Date.now();
+  if (s) s.lastSeen = Date.now();
   return true;
 }
 function sessionCount() {
@@ -1402,7 +1448,8 @@ async function handler(req, res) {
         case "img":
           result = await server.handleImg(searchParams);
           break;
-        case "auth":
+        case "auth": {
+          const ip = (getHeader(req, isNode, "x-forwarded-for").split(",")[0] || "").trim() || isNode && req.socket && req.socket.remoteAddress || "";
           if (method === "POST") {
             if (isNode) bodyText = await readNodeBody(req);
             else bodyText = await req.text().catch(() => "");
@@ -1411,12 +1458,13 @@ async function handler(req, res) {
               b = JSON.parse(bodyText || "{}");
             } catch {
             }
-            const token = login(String(b.user || ""), String(b.pass || ""));
+            const token = login(String(b.user || ""), String(b.pass || ""), ip);
             result = token ? json({ ok: true, token, count: sessionCount() }, 200) : json({ ok: false, error: "invalid credentials" }, 401);
           } else {
-            result = json({ ok: check(authToken), count: sessionCount() });
+            result = json({ ok: check(authToken, ip), count: sessionCount() });
           }
           break;
+        }
         case "health":
           result = server.handleHealth();
           break;

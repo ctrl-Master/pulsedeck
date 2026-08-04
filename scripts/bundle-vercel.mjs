@@ -27,7 +27,7 @@ const banner =
 const cmd =
   'npx --yes esbuild ' +
   JSON.stringify(entry) +
-  ' --bundle --format=esm --platform=neutral --target=es2022' +
+  ' --bundle --format=esm --platform=node --target=es2022' +
   ' --outfile=' + JSON.stringify(out) +
   ' --banner:js=' + JSON.stringify(banner);
 
