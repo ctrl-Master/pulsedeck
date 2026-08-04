@@ -1205,12 +1205,15 @@ var server = {
   async handleConfig() {
     return json({
       categories: CATEGORIES,
-      sources: FEEDS.map((f) => ({
+      // 前端 renderSources 全程读 state.config.feeds（含 enabled 决定默认勾选），
+      // 字段名必须与前端预期一致，不能写成 sources。
+      feeds: FEEDS.map((f) => ({
         id: f.id,
         name: f.name,
         category: f.category,
         url: f.url,
         weight: f.weight,
+        enabled: true,
         community: !!f.community
       })),
       count: FEEDS.length
